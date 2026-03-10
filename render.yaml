@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: finance-tracker
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn webapp:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false

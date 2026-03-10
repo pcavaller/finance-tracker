@@ -1,0 +1,10 @@
+python-telegram-bot==20.7
+anthropic
+gspread
+google-auth
+pdfplumber
+beautifulsoup4
+python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart
