@@ -16,57 +16,131 @@ RULES: list[tuple[str, list[str]]] = [
         'SANTAGLORIA', 'CHURRERIA', 'FORNERIA', 'BONANOVA 96', 'ALIMENTACIO', 'SUPERMERCAT',
         'SUPERMERCADO', 'LIDL', 'ALDI', 'CARREFOUR', 'EROSKI', 'CONSUM', 'DIA ',
         'EL CORTE INGLES-SUPER', 'CONDIS', 'SUPERCOR', 'FROIZ', 'MERCADO',
+        'MANTEQUERIA', 'ARTESANS DEL BACALLA', 'CAPRABO', 'SPAR ', 'CARREF',
+        'PATES MAS', '365 BALMES', 'DISCOUNT VIA AUGUSTA', 'SANTA CRISTINA MARKET',
+        'MACXIPA',
     ]),
     ('Restaurantes', [
         'LENTRECOTE', 'TOMAS DE SARRIA', 'VIPS', 'HEMINGWAY', 'RODILLA', 'CAFETERIA',
         'OCA LOCA', 'CASA PETRA', 'LAS MUNS', 'BAR LA SALA', 'BODEGON', 'DONOSTIA',
-        'BURGUER', 'BURGER', 'MCDONALDS', 'MCDONALD', 'KFC', 'STARBUCKS', 'FOSTER',
+        'BURGUER', 'BURGER', 'MCDONALDS', 'MCDONALD', 'MC DONALDS', 'KFC', 'STARBUCKS', 'FOSTER',
+        'BK ', 'BURGER KING',
         'RESTAURANTE', 'RESTAURANT', 'PIZZERIA', 'SUSHI', 'KEBAB', 'TAPAS',
         'GLORIA C STA', 'GATE GOURMET', 'CAFE', 'COFFEE', 'BRUNCH',
         'FORNET', 'EL FORNET', 'GRANJA', 'CHARCUTERIA',
+        'VOLAPIE', 'MORRO FI', 'LA PARADA', 'BAR LA BODEGA', 'BAR DEL PI',
+        'CREP NOVA', 'CREPNOVA', 'HERMOSO', 'BAKERY', 'FORN DE PA', 'HORA PUNTA',
+        'BODEGA', 'MARTINS', 'CHARTER', 'ARTAL', 'RS BARKI', 'CHIQUITO',
+        'FUN DIM SUM', 'ENTRECOTE', 'LES BRASES', 'TRATTORIA', 'TAGLIATELLA',
+        'PISAPA', 'LA LLESCA', 'ENTREPANES', 'DON CALAMAR', 'DA NANNI',
+        'FORN DE SANT', 'UPPER LOUNGE', 'BOUBONVERD', 'SANTA MARKET',
+        'SECRETS BONANOVA', 'M. SAN LEOPOLDO', 'RITMO',
+        'MANOLO BAKES', 'CA LA TRESA', 'BRAVAS', 'CRISBAR', 'QUINTO PINO',
+        'CASAMATA', 'CERVECERIA', 'AUTOGRILL', 'EL FRONTAL', 'CAL MIDI',
+        'TIO BIGOTES', 'SABOR ISTAMBUL', 'SANTA GLORIA', 'GELATERIA',
+        'FRIGIDARIUM', 'AREAS ', 'TURRIS PANEM', 'SQ *LA BARRA', 'GASTRO PLANET',
+        'THE GEORGE PAYNE', 'ENRIQUE TOMAS', 'APERITIVOS', 'LORETO',
+        'EXPNUNEZ', 'L OBRADOR', 'PASTISSERIA', 'PIZZAS KING', 'DOMINOS',
+        'BAR RTE', 'BAR OLAGUER', 'COMPTE BORELL', 'MICHELANGELO',
+        'EL LORO BLANCO', 'LA PLATJA', 'PATES MAS', 'CAL MIDI',
+    ]),
+    ('Taxi', [
+        'TAXI', 'UBER', 'CABIFY', 'BOLT', 'FREE NOW', 'FREENOW', 'MYTAXI',
+    ]),
+    ('Coche', [
+        'GASOLINERA', 'ESTACION SERVICIO', 'ESTA. SERV', 'EE SS', 'REPSOL', 'CEPSA',
+        'BP ', 'SHELL', 'GALP', 'PETROL', 'COMBUSTIBLE', 'CARBURANTE',
+        'ITV', 'TALLER', 'AUTOLAVADO', 'NEUMATICO', 'AUTOPISTA', 'PEAJE',
+        'JOYOSA', 'PARKING', 'IBERMOTOR', 'APARCAMIENTO', 'APARCA',
+        'SABA ', 'EMPARK', 'BSM ', 'INDIGO PARK', 'ZITY',
+        'MEROIL', 'BALLENOIL', 'CEDIPSA', 'TUNELSPAN', 'AP. PL.', 'AP.TANATORI',
+        'MATARO PARK', 'AP. RIERA', 'TANATORI', 'ALCAMPO',
     ]),
     ('Transporte', [
-        'IRYO', 'RENFE', 'CERCANIAS', 'UBER', 'JOYOSA', 'GASOLINERA', 'ESTACION SERVICIO',
-        'ESTA. SERV', 'REPSOL', 'CEPSA', 'BP ', 'SHELL', 'GALP', 'CABIFY',
-        'VUELING', 'IBERIA', 'RYANAIR', 'EASYJET', 'AENA', 'PEAJE', 'AUTOPISTA',
-        'TAXI', 'BUS ', 'METRO ', 'TMB', 'EMT ', 'BICING', 'BLABLACAR',
-        'MARCHITA', 'MARCILLA', 'TIEBAS',
+        'IRYO', 'RENFE', 'CERCANIAS',
+        'VUELING', 'IBERIA', 'RYANAIR', 'EASYJET', 'AENA',
+        'BUS ', 'METRO ', 'TMB', 'EMT ', 'BICING', 'BLABLACAR',
+        'MARCHITA', 'MARCILLA', 'TIEBAS', 'WIB ADVANCE', 'FGC',
+        'TRAINLINE', 'INTERMODALIDAD', 'FREE2MOVE', 'ADR MOBILITY',
+        'ATAC ', 'MYCICERO', 'MOBILITA',
     ]),
     ('Ropa/Compras', [
         'CORTEFIEL', 'EDWARDS', 'ESE O ESE', 'RENATTAGO', 'SP RENATTAGO',
         'ZARA', 'H&M', 'MANGO', 'MASSIMO DUTTI', 'PULL', 'BERSHKA', 'STRADIVARIUS',
-        'AMAZON', 'WWW.AMAZON', 'EL CORTE INGLES', 'FNAC', 'MEDIA MARKT',
+        'AMAZON', 'WWW.AMAZON', 'AMZN ', 'EL CORTE INGLES', 'FNAC', 'MEDIA MARKT',
         'DECATHLON', 'IKEA', 'PRIMARK', 'NIKE', 'ADIDAS',
+        'CHARLES TYRWHITT', 'SPRINGFIELD', 'EDWARD', 'ALIEXPRESS',
+        'SINGULARU', 'WETSUIT', 'DRIM', 'NATURA ', 'SP POLO', 'SP OTOMI',
+        'BONPRIX', 'MYCORNER', 'ABACUS', 'MULAYA', 'KEBI',
     ]),
     ('Cultura/Entretenimiento', [
         'LICEU', 'TEATRO', 'TEATRE', 'LIBRO', 'CASA DEL LIBRO', 'FNAC LIBRO',
         'CINEMA', 'CINE ', 'CONCERT', 'MUSEU', 'MUSEO', 'SPOTIFY', 'NETFLIX',
         'HBO', 'DISNEY', 'PRIME VIDEO', 'TWITCH', 'STEAM', 'PLAYSTATION',
+        'ESQUI', 'ESQUÍ', 'MASELLA', 'SKI', 'PISTAS',
     ]),
     ('Suscripciones/Tech', [
         'CLAUDE', 'ANTHROPIC', 'SUBSCRIPTION', 'OPENAI', 'CHATGPT',
         'APPLE.COM', 'GOOGLE ONE', 'DROPBOX', 'NOTION', 'GITHUB',
         'MICROSOFT', 'ADOBE', 'FIGMA', 'SLACK', 'ZOOM', 'ICLOUD',
-    ]),
-    ('Parking', [
-        'PARKING', 'IBERMOTOR', 'TANATORI', 'APARCAMIENTO', 'APARCA',
-        'SABA ', 'EMPARK', 'BSM ', 'INDIGO PARK',
+        'TRADINGVIEW', 'RFRANCO', 'HETZNER',
     ]),
     ('Hogar/Recibos', [
         'TRES TORRES DIR', 'RECIBO', 'CITY SPORT', 'GIMNASIO', 'GYM',
         'ENDESA', 'IBERDROLA', 'NATURGY', 'GAS NATURAL', 'AIGUES',
         'COMUNIDAD', 'SEGURO', 'MAPFRE', 'ADESLAS', 'SANITAS',
         'VODAFONE', 'MOVISTAR', 'ORANGE', 'JAZZTEL', 'MASMOVIL',
+        'TINTORERIA', 'TINTORERA', 'UBEXTEL', 'FAMILY ENERGY', 'MAYA MOBILE',
+        'INICIATIVES DE L', 'UTE DEVAS',
+    ]),
+    ('Bizum', [
+        'BIZUM →', 'BIZUM A FAVOR',
+    ]),
+    ('Apuestas', [
+        'BETFAIR', 'BWIN', 'CODERE', 'SPORTIUM', 'BET365', 'POKERSTARS',
+        'RETABET', 'CASUMO', 'INTERWETTEN', 'KIROLBET', 'SAINTPAY',
+    ]),
+    ('Clubs', [
+        'YOUTH ECONOMIC CIRCLE', 'REAL CLUB DE POLO', 'CLUB DE POLO',
+        'CLUB DE TENIS', 'R.CLUB', 'SOC.COOP.CULTURE',
+    ]),
+    ('Formación', [
+        'SOUL COLLEGE', 'COURSERA', 'UDEMY', 'MASTERCLASS', 'STOYNOV', 'CFA ',
+        'JOBLEADS', 'VIARO', 'COL.LEGI', 'ESCOLA ',
+    ]),
+    ('Regalos', [
+        'FLORES', 'FLORISTERIA', 'FLORESADOMICILIO', 'RAMO',
+        'JAUME Y NINA', 'NACHO SANCHEZ Y MARISOL', 'NACHO SÁNCHEZ Y MARISOL',
+    ]),
+    ('Viajes', [
+        'HOTEL', 'HOSTAL', 'AIRBNB', 'BOOKING', 'ROC BLANC',
+        'AEROPORT', 'AIRPORT', 'AEROPUERTO', 'AÉROPORT', 'AEROP',
+    ]),
+    ('Impuestos', [
+        'IRPF', 'IMPUESTO', 'HACIENDA', 'AGENCIA TRIBUTARIA',
     ]),
     ('Salud', [
         'FARMACIA', 'CLINICA', 'DOCTOR', 'DENTAL', 'OPTICA', 'FISIO',
-        'HOSPITAL', 'MEDICO', 'LABORATORIO', 'BLOOM DE SARRIA',
+        'HOSPITAL', 'MEDICO', 'LABORATORIO', 'BLOOM', 'DR. ', 'DR.',
     ]),
 ]
 
 
+_custom_rules: list[tuple[str, str]] = []
+
+
+def load_custom_rules(sheets_client) -> None:
+    """Load user-defined rules from Google Sheets into memory."""
+    global _custom_rules
+    _custom_rules = sheets_client.get_custom_rules()
+
+
 def _classify_description(description: str) -> str:
     desc_upper = description.upper()
+    # Custom rules (from Sheets) take priority
+    for keyword, category in _custom_rules:
+        if keyword in desc_upper:
+            return category
     for category, keywords in RULES:
         if any(kw.upper() in desc_upper for kw in keywords):
             return category

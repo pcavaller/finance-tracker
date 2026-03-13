@@ -17,13 +17,22 @@ CATEGORIES = [
     'Alimentación',
     'Restaurantes',
     'Ropa/Compras',
+    'Taxi',
+    'Coche',
     'Transporte',
     'Cultura/Entretenimiento',
     'Suscripciones/Tech',
-    'Parking',
     'Hogar/Recibos',
     'Salud',
     'Efectivo',
+    'Devolución',
+    'Bizum',
+    'Apuestas',
+    'Clubs',
+    'Formación',
+    'Regalos',
+    'Viajes',
+    'Impuestos',
     'Otros',
 ]
 
@@ -31,13 +40,22 @@ CATEGORY_EMOJI = {
     'Alimentación': '🛒',
     'Restaurantes': '🍽',
     'Ropa/Compras': '👔',
+    'Taxi': '🚕',
+    'Coche': '🚗',
     'Transporte': '🚌',
     'Cultura/Entretenimiento': '🎭',
     'Suscripciones/Tech': '💻',
-    'Parking': '🅿',
     'Hogar/Recibos': '🏠',
     'Salud': '❤',
     'Efectivo': '💵',
+    'Bizum': '📲',
+    'Apuestas': '🎲',
+    'Clubs': '🏛',
+    'Formación': '📚',
+    'Regalos': '🎁',
+    'Viajes': '✈️',
+    'Impuestos': '🏛',
+    'Devolución': '↩️',
     'Otros': '📦',
 }
 
@@ -49,6 +67,13 @@ OWN_ACCOUNT_KEYWORDS = [
     'TRADE ES',
     'IBKR',
     'PABLO CAVALLER',
+    'MYINVESTOR',
+    'BINANCE',
+    'BIFINITY',
+    'NAGA MARKETS',
+    'BGET',
+    'BUTGET',
+    'TRADE REPUBLIC',
 ]
 
 
@@ -126,8 +151,8 @@ def detect_bank(filename: str) -> str:
     if 'extracto' in name or 'trade' in name or 'republic' in name:
         return 'trade_republic'
     if 'movimientos' in name or 'openbank' in name or 'cuenta' in name:
-        return 'openbank'
-    if 'revolut' in name:
+        return 'openbank_pdf' if name.endswith('.pdf') else 'openbank'
+    if 'revolut' in name or 'account-statement' in name:
         return 'revolut'
     return 'unknown'
 
@@ -378,5 +403,196 @@ class OpenbankParser:
                                    amount=amount, tx_type='income', bank='Openbank')
             return Transaction(date=date, description=concepto, amount=amount,
                                tx_type='income', bank='Openbank')
+
+        return None
+
+
+# ── Openbank PDF Parser ────────────────────────────────────────────────────────
+
+class OpenbankPDFParser:
+    """
+    Parse Openbank account statement PDFs.
+    Column layout (x0 boundaries):
+      Fecha Operación: ~57 | Fecha Valor: ~122 | Concepto: 180–441
+      Importe: 441–530 | Saldo: ≥530
+    """
+    X_FECHA2 = 115
+    X_CONCEPTO = 175
+    X_IMPORTE = 441
+    X_SALDO = 528
+
+    _AMOUNT_RE = re.compile(r'^-?\d{1,3}(?:\.\d{3})*,\d{2}$')
+    _DATE_RE = re.compile(r'^\d{2}/\d{2}/\d{4}$')
+    _NOISE = re.compile(r'^(EUR|Fecha|Operación|Valor|Concepto|Importe|Saldo|FIN)$', re.I)
+
+    def parse(self, pdf_path: str) -> list[Transaction]:
+        transactions = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                words = page.extract_words()
+                transactions.extend(self._parse_page(words))
+        return transactions
+
+    def _parse_page(self, words: list[dict]) -> list[Transaction]:
+        # Find top-y of each transaction's fecha column (x0 ~57, DD/MM/YYYY)
+        # Concepto can start ~6px BEFORE the date line, so we use date_top - 6 as block start
+        date_tops = sorted({
+            w['top'] for w in words
+            if self._DATE_RE.match(w['text']) and 50 < w['x0'] < 90
+        })
+        if not date_tops:
+            return []
+
+        # Build blocks: words with top in [date_top_i - 6, date_top_{i+1} - 6)
+        results = []
+        for i, dt in enumerate(date_tops):
+            block_start = dt - 6
+            block_end = date_tops[i + 1] - 6 if i + 1 < len(date_tops) else float('inf')
+            block = [w for w in words if block_start <= w['top'] < block_end]
+            tx = self._parse_block(block)
+            if tx:
+                results.append(tx)
+        return results
+
+    def _parse_block(self, block: list[dict]) -> Optional[Transaction]:
+        all_words = block
+
+        date_words = [w for w in all_words if self._DATE_RE.match(w['text']) and w['x0'] < self.X_FECHA2]
+        if not date_words:
+            return None
+        try:
+            date = datetime.strptime(date_words[0]['text'], '%d/%m/%Y')
+        except ValueError:
+            return None
+
+        importe_words = [w for w in all_words if self.X_IMPORTE <= w['x0'] < self.X_SALDO
+                         and self._AMOUNT_RE.match(w['text'])]
+        if not importe_words:
+            return None
+        try:
+            amount = float(importe_words[0]['text'].replace('.', '').replace(',', '.'))
+        except ValueError:
+            return None
+
+        concepto_words = [w['text'] for w in all_words
+                          if self.X_CONCEPTO <= w['x0'] < self.X_IMPORTE
+                          and not self._NOISE.match(w['text'])
+                          and not self._DATE_RE.match(w['text'])]
+        concepto = ' '.join(concepto_words).strip()
+        if not concepto:
+            return None
+
+        cu = concepto.upper()
+
+        if 'DIVERINVEST' in cu:
+            if amount > 0:
+                desc = 'Nómina DiverInvest' if 'NOMINA' in cu or 'NÓMINA' in cu else f'DiverInvest: {concepto}'
+                return Transaction(date=date, description=desc, amount=amount,
+                                   tx_type='income', bank='Openbank')
+
+        if 'CAJERO' in cu or 'DISPOSICION' in cu:
+            return Transaction(date=date, description=f'Cajero {abs(amount):.0f}€',
+                               amount=abs(amount), tx_type='cash_withdrawal', bank='Openbank')
+
+        if 'REVOLUT' in cu and amount < 0:
+            return Transaction(date=date, description=concepto, amount=abs(amount),
+                               tx_type='internal', bank='Openbank')
+
+        if _is_internal(concepto):
+            return Transaction(date=date, description=concepto, amount=abs(amount),
+                               tx_type='internal', bank='Openbank')
+
+        if amount < 0:
+            desc = _clean_openbank_desc(concepto)
+            return Transaction(date=date, description=desc, amount=abs(amount),
+                               tx_type='expense', bank='Openbank')
+
+        if amount > 0:
+            if 'BIZUM DE' in cu:
+                desc = re.sub(r'^BIZUM DE\s*', '', concepto, flags=re.I)
+                desc = re.sub(r'\s+CONCEPTO.*', '', desc, flags=re.I).strip()
+                return Transaction(date=date, description=f'Bizum de {desc}',
+                                   amount=amount, tx_type='income', bank='Openbank')
+            return Transaction(date=date, description=concepto, amount=amount,
+                               tx_type='income', bank='Openbank')
+
+        return None
+
+
+# ── Revolut PDF Parser ─────────────────────────────────────────────────────────
+
+class RevolutPDFParser:
+    X_DATE = 46
+    X_DESC = 190
+    X_SALIENTE = 390
+    X_ENTRANTE = 468
+    X_SALDO = 525
+
+    _AMOUNT_RE = re.compile(r'^€(\d+(?:\.\d{2})?)$')
+    _DAY_RE = re.compile(r'^\d{1,2}$')
+
+    def parse(self, pdf_path: str) -> list[Transaction]:
+        transactions = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                transactions.extend(self._parse_page(page.extract_words()))
+        return transactions
+
+    def _parse_page(self, words: list[dict]) -> list[Transaction]:
+        # Use exact top values (no rounding) to avoid float comparison issues
+        day_tops = sorted({
+            w['top'] for w in words
+            if self._DAY_RE.match(w['text']) and w['x0'] < self.X_DATE
+        })
+        if not day_tops:
+            return []
+        results = []
+        for i, dt in enumerate(day_tops):
+            block_end = day_tops[i + 1] if i + 1 < len(day_tops) else float('inf')
+            block = [w for w in words if dt <= w['top'] < block_end]
+            tx = self._parse_block(block)
+            if tx:
+                results.append(tx)
+        return results
+
+    def _parse_block(self, block: list[dict]) -> Optional[Transaction]:
+        first_top = block[0]['top']
+        first_line = [w for w in block if abs(w['top'] - first_top) < 3]
+
+        date_words = sorted([w for w in first_line if w['x0'] < 80], key=lambda x: x['x0'])
+        date = _parse_date_es(' '.join(w['text'] for w in date_words[:3]))
+        if not date:
+            return None
+
+        saliente_words = [w for w in first_line if self.X_SALIENTE <= w['x0'] < self.X_ENTRANTE and self._AMOUNT_RE.match(w['text'])]
+        entrante_words = [w for w in first_line if self.X_ENTRANTE <= w['x0'] < self.X_SALDO and self._AMOUNT_RE.match(w['text'])]
+        saliente = float(self._AMOUNT_RE.match(saliente_words[0]['text']).group(1)) if saliente_words else None
+        entrante = float(self._AMOUNT_RE.match(entrante_words[0]['text']).group(1)) if entrante_words else None
+
+        if saliente is None and entrante is None:
+            return None
+
+        desc_words = [w['text'] for w in first_line if self.X_DESC <= w['x0'] < self.X_SALIENTE]
+        desc = ' '.join(desc_words).strip()
+        if not desc:
+            return None
+
+        desc_upper = desc.upper()
+
+        if 'RECARGA DE' in desc_upper or _is_internal(desc):
+            return Transaction(date=date, description=desc, amount=saliente or entrante or 0,
+                               tx_type='internal', bank='Revolut')
+
+        if 'REVOLUT DIGITAL' in desc_upper or 'TRANSFER FROM REVOLUT' in desc_upper:
+            return Transaction(date=date, description=desc, amount=entrante or saliente or 0,
+                               tx_type='investment', bank='Revolut')
+
+        if saliente:
+            return Transaction(date=date, description=desc, amount=saliente,
+                               tx_type='expense', bank='Revolut')
+
+        if entrante:
+            return Transaction(date=date, description=desc, amount=entrante,
+                               tx_type='income', bank='Revolut')
 
         return None

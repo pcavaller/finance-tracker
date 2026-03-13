@@ -15,13 +15,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from parsers import detect_bank, TradeRepublicParser, OpenbankParser, Transaction
-from classifier import classify_batch
+from parsers import (
+    detect_bank, TradeRepublicParser, OpenbankParser,
+    OpenbankPDFParser, RevolutPDFParser, Transaction,
+)
+from classifier import classify_batch, load_custom_rules
 from sheets import SheetsClient
 
 app = FastAPI(title="Finance Tracker")
 
 sheets = SheetsClient()
+load_custom_rules(sheets)
 sessions: dict = {}
 
 
@@ -56,7 +60,7 @@ async def upload_file(file: UploadFile = File(...)):
         else:
             raise HTTPException(400, "Archivo no reconocido.")
 
-    suffix = '.pdf' if bank_key == 'trade_republic' else '.xls'
+    suffix = '.pdf' if (bank_key in ('trade_republic', 'openbank_pdf', 'revolut') or filename.lower().endswith('.pdf')) else '.xls'
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         content = await file.read()
@@ -67,11 +71,17 @@ async def upload_file(file: UploadFile = File(...)):
         if bank_key == 'trade_republic':
             all_txs = TradeRepublicParser().parse(tmp_path)
             bank_name = 'Trade Republic'
+        elif bank_key == 'openbank_pdf':
+            all_txs = OpenbankPDFParser().parse(tmp_path)
+            bank_name = 'Openbank'
+        elif bank_key == 'revolut':
+            all_txs = RevolutPDFParser().parse(tmp_path)
+            bank_name = 'Revolut'
         else:
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'
 
-        expenses = [tx for tx in all_txs if tx.tx_type == 'expense']
+        expenses = [tx for tx in all_txs if tx.tx_type in ('expense', 'income')]
         excluded = len(all_txs) - len(expenses)
 
         categories = classify_batch(expenses)
