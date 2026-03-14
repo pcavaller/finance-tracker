@@ -222,8 +222,11 @@ class TradeRepublicParser:
             tx_blocks.append(current_block)
 
         transactions = []
+        prev_balance: Optional[float] = None
         for block in tx_blocks:
-            tx = self._parse_block(block)
+            tx, current_balance = self._parse_block(block, prev_balance)
+            if current_balance is not None:
+                prev_balance = current_balance
             if tx:
                 transactions.append(tx)
         return transactions
@@ -247,9 +250,9 @@ class TradeRepublicParser:
         lines.append(sorted(current, key=lambda x: x['x0']))
         return lines
 
-    def _parse_block(self, words: list[dict]) -> Optional[Transaction]:
-        """Parse a transaction from its collected words."""
-        fecha_words, tipo_words, desc_words, entrada_words, salida_words = [], [], [], [], []
+    def _parse_block(self, words: list[dict], prev_balance: Optional[float] = None) -> tuple[Optional[Transaction], Optional[float]]:
+        """Parse a transaction from its collected words. Returns (transaction, balance_after)."""
+        fecha_words, tipo_words, desc_words, entrada_words, salida_words, balance_words = [], [], [], [], [], []
 
         for w in words:
             x = w['x0']
@@ -264,54 +267,68 @@ class TradeRepublicParser:
                 entrada_words.append(t)
             elif x < self.X_BALANCE:
                 salida_words.append(t)
-            # Balance column ignored
+            else:
+                balance_words.append(t)
 
         date = _parse_date_es(' '.join(fecha_words))
         if not date:
-            return None
+            return None, None
 
         tipo = ' '.join(tipo_words).strip()
         desc = _clean_tr_desc(' '.join(desc_words))
         entrada = _parse_amount(' '.join(entrada_words))
         salida = _parse_amount(' '.join(salida_words))
+        # Only keep numeric tokens (ignore "EUR" currency labels)
+        balance_numeric = [t for t in balance_words if re.search(r'\d', t)]
+        current_balance = _parse_amount(' '.join(balance_numeric[:1]))
 
         # Interest / bonuses → income
         if any(k in tipo for k in ('Interés', 'Bonificación')):
             if entrada:
                 return Transaction(date=date, description=desc or tipo, amount=entrada,
-                                   tx_type='income', bank='Trade Republic')
-            return None
+                                   tx_type='income', bank='Trade Republic'), current_balance
+            return None, current_balance
 
         # Investment operations
         if 'Operar' in tipo:
             amount = salida or entrada or 0
             return Transaction(date=date, description=desc, amount=amount,
-                               tx_type='investment', bank='Trade Republic')
+                               tx_type='investment', bank='Trade Republic'), current_balance
 
         # Transfers
         if 'Transferencia' in tipo:
             amount = salida or entrada or 0
             if _is_internal(desc):
                 return Transaction(date=date, description=desc, amount=amount,
-                                   tx_type='internal', bank='Trade Republic')
+                                   tx_type='internal', bank='Trade Republic'), current_balance
             if salida:
                 return Transaction(date=date, description=desc, amount=salida,
-                                   tx_type='expense', bank='Trade Republic')
+                                   tx_type='expense', bank='Trade Republic'), current_balance
             if entrada:
                 return Transaction(date=date, description=desc, amount=entrada,
-                                   tx_type='income', bank='Trade Republic')
-            return None
+                                   tx_type='income', bank='Trade Republic'), current_balance
+            return None, current_balance
 
         # Card transactions
         if 'tarjeta' in tipo or 'Transacción' in tipo:
             if salida:
                 return Transaction(date=date, description=desc, amount=salida,
-                                   tx_type='expense', bank='Trade Republic')
+                                   tx_type='expense', bank='Trade Republic'), current_balance
             if entrada:
-                return Transaction(date=date, description=f'[Devolución] {desc}',
-                                   amount=entrada, tx_type='income', bank='Trade Republic')
+                # New PDF format: amounts appear in ENTRADA column for both expenses and refunds.
+                # Use balance direction to distinguish: balance drop → expense, balance rise → refund.
+                if prev_balance is not None and current_balance is not None:
+                    if current_balance < prev_balance:
+                        return Transaction(date=date, description=desc, amount=entrada,
+                                           tx_type='expense', bank='Trade Republic'), current_balance
+                    else:
+                        return Transaction(date=date, description=f'[Devolución] {desc}',
+                                           amount=entrada, tx_type='income', bank='Trade Republic'), current_balance
+                # Fallback: no balance data → assume expense (card transactions are usually expenses)
+                return Transaction(date=date, description=desc, amount=entrada,
+                                   tx_type='expense', bank='Trade Republic'), current_balance
 
-        return None
+        return None, current_balance
 
 
 # ── Openbank XLS (HTML) Parser ─────────────────────────────────────────────────
