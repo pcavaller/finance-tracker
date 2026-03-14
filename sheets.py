@@ -160,6 +160,17 @@ class SheetsClient:
         if name not in existing:
             self.ws_personas.append_row([name, datetime.now().strftime('%Y-%m-%d')])
 
+    def get_learned_classifications(self) -> dict[str, str]:
+        """Returns dict of {description_upper: category} from historical expenses."""
+        rows = self._get_all_records()
+        learned = {}
+        for r in rows:
+            desc = r.get('Descripción', '').strip().upper()
+            cat = r.get('Categoría', '').strip()
+            if desc and cat and cat != 'Otros':
+                learned[desc] = cat
+        return learned
+
     def get_custom_rules(self) -> list[tuple[str, str]]:
         """Returns list of (keyword_upper, category) from the Reglas sheet."""
         rows = self.ws_reglas.get_all_records()

@@ -54,7 +54,7 @@ RULES: list[tuple[str, list[str]]] = [
         'JOYOSA', 'PARKING', 'IBERMOTOR', 'APARCAMIENTO', 'APARCA',
         'SABA ', 'EMPARK', 'BSM ', 'INDIGO PARK', 'ZITY',
         'MEROIL', 'BALLENOIL', 'CEDIPSA', 'TUNELSPAN', 'AP. PL.', 'AP.TANATORI',
-        'MATARO PARK', 'AP. RIERA', 'TANATORI', 'ALCAMPO',
+        'MATARO PARK', 'AP. RIERA', 'TANATORI', 'ALCAMPO', 'BON AREA',
     ]),
     ('Transporte', [
         'IRYO', 'RENFE', 'CERCANIAS',
@@ -127,23 +127,29 @@ RULES: list[tuple[str, list[str]]] = [
 
 
 _custom_rules: list[tuple[str, str]] = []
+_learned: dict[str, str] = {}
 
 
 def load_custom_rules(sheets_client) -> None:
-    """Load user-defined rules from Google Sheets into memory."""
-    global _custom_rules
+    """Load user-defined rules and historical classifications from Google Sheets."""
+    global _custom_rules, _learned
     _custom_rules = sheets_client.get_custom_rules()
+    _learned = sheets_client.get_learned_classifications()
 
 
 def _classify_description(description: str) -> str:
     desc_upper = description.upper()
-    # Custom rules (from Sheets) take priority
+    # 1. Custom rules (from Sheets) — highest priority
     for keyword, category in _custom_rules:
         if keyword in desc_upper:
             return category
+    # 2. Static keyword rules
     for category, keywords in RULES:
         if any(kw.upper() in desc_upper for kw in keywords):
             return category
+    # 3. Historical learning — exact match on description
+    if desc_upper in _learned:
+        return _learned[desc_upper]
     return 'Otros'
 
 

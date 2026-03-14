@@ -261,10 +261,12 @@
                   <span class="text-xs text-gray-400" x-text="tx.bank"></span>
                 </div>
                 <!-- Category selector -->
-                <select x-model="tx.category" x-show="!tx.skipped"
+                <select x-show="!tx.skipped"
+                  :value="tx.category"
+                  @change="tx.category = $event.target.value"
                   class="mt-2 text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 text-gray-600">
                   <template x-for="cat in categories" :key="cat">
-                    <option :value="cat" x-text="catEmoji(cat) + ' ' + cat"></option>
+                    <option :value="cat" :selected="cat === tx.category" x-text="catEmoji(cat) + ' ' + cat"></option>
                   </template>
                 </select>
               </div>
