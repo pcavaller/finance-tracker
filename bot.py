@@ -258,11 +258,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'
 
-        # Include expenses + all income (devoluciones, bizums entrantes, etc.)
-        expenses = [tx for tx in all_txs if tx.tx_type in ('expense', 'income')]
-        for tx in expenses:
-            if tx.tx_type == 'income' and not tx.category:
-                tx.category = 'Devolución'
+        # Include expenses + only meaningful income (refunds and incoming bizums)
+        expenses = [tx for tx in all_txs
+                    if tx.tx_type == 'expense'
+                    or (tx.tx_type == 'income' and (
+                        '[Devolución]' in tx.description
+                        or 'Bizum de' in tx.description
+                        or 'BIZUM DE' in tx.description.upper()
+                    ))]
         excluded = len(all_txs) - len(expenses)
 
         if not expenses:
