@@ -156,11 +156,11 @@
         </div>
       </div>
 
-      <!-- Chart -->
-      <div x-show="!dashLoading && dashCategories.length > 0" class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Distribución</h2>
-        <div class="relative" style="height: 220px;">
-          <canvas id="dashChart"></canvas>
+      <!-- Monthly trend bar chart -->
+      <div x-show="!dashLoading && trendMonths.length > 1" class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Evolución mensual</h2>
+        <div class="relative" style="height: 200px;">
+          <canvas id="trendChart"></canvas>
         </div>
       </div>
 
@@ -409,46 +409,172 @@
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════
+         VIEW: BUSCAR
+    ══════════════════════════════════════════ -->
+    <div x-show="view === 'search'">
+      <div class="mt-6">
+        <h2 class="text-xl font-bold text-gray-900">Buscar</h2>
+        <p class="text-sm text-gray-500 mt-1">Busca en todas tus transacciones</p>
+      </div>
+      <div class="mt-4 relative">
+        <input type="text" x-model="searchQuery" @input.debounce.400ms="doSearch()"
+          placeholder="Mercadona, taxi, Netflix..."
+          class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10">
+        <span class="absolute right-3 top-3 text-gray-400 text-lg">🔍</span>
+      </div>
+      <div x-show="searchLoading" class="mt-6 text-center py-8">
+        <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+      <div x-show="!searchLoading && searchQuery.length >= 2 && searchResults.length === 0"
+        class="mt-8 text-center py-12 text-gray-400">
+        <p class="text-4xl mb-3">🔍</p>
+        <p class="font-medium text-gray-500">Sin resultados</p>
+      </div>
+      <div x-show="!searchLoading && searchResults.length > 0" class="mt-4">
+        <p class="text-xs text-gray-400 mb-3" x-text="searchResults.length + ' resultado' + (searchResults.length !== 1 ? 's' : '')"></p>
+        <template x-for="tx in searchResults" :key="tx.description + tx.date + tx.mes">
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-2 flex items-center gap-3">
+            <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl shrink-0"
+              x-text="catEmoji(tx.category)"></div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
+              <p class="text-xs text-gray-400 mt-0.5">
+                <span x-text="tx.date"></span> · <span x-text="tx.category"></span>
+                <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
+              </p>
+            </div>
+            <span class="font-semibold text-gray-900 shrink-0" x-text="fmtAmount(tx.amount)"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════
+         VIEW: ANUAL
+    ══════════════════════════════════════════ -->
+    <div x-show="view === 'annual'">
+      <div class="mt-6 flex items-center justify-between">
+        <h2 class="text-xl font-bold text-gray-900">Resumen anual</h2>
+        <div class="flex items-center gap-2">
+          <button @click="annualYear--; loadAnnual()" class="p-1.5 rounded-full hover:bg-gray-200 text-gray-500">‹</button>
+          <span class="font-semibold text-gray-800 w-12 text-center" x-text="annualYear"></span>
+          <button @click="annualYear++; loadAnnual()"
+            :disabled="annualYear >= new Date().getFullYear()"
+            :class="annualYear >= new Date().getFullYear() ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-200'"
+            class="p-1.5 rounded-full text-gray-500">›</button>
+        </div>
+      </div>
+
+      <div x-show="annualLoading" class="mt-8 text-center py-8">
+        <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+
+      <!-- Annual total card -->
+      <div x-show="!annualLoading && annualCategories.length > 0"
+        class="mt-4 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-5 text-white shadow-lg">
+        <p class="text-indigo-200 text-sm font-medium">Total gastado <span x-text="annualYear"></span></p>
+        <p class="text-4xl font-bold mt-1" x-text="fmtAmount(annualTotal)"></p>
+        <p class="text-indigo-200 text-xs mt-1" x-text="'Promedio mensual: ' + fmtAmount(annualTotal / 12)"></p>
+      </div>
+
+      <!-- Month by month table -->
+      <div x-show="!annualLoading && annualMonths.length > 0"
+        class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Por mes</h3>
+        <template x-for="m in annualMonths" :key="m.month">
+          <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+            <span class="text-sm text-gray-700 capitalize" x-text="fmtMonthLabel(m.month)"></span>
+            <div class="flex items-center gap-3">
+              <div class="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div class="h-1.5 bg-indigo-400 rounded-full"
+                  :style="'width:' + Math.round((m.total / annualMaxMonth) * 100) + '%'"></div>
+              </div>
+              <span class="text-sm font-semibold text-gray-800 w-20 text-right" x-text="fmtAmount(m.total)"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- Categories breakdown -->
+      <div x-show="!annualLoading && annualCategories.length > 0"
+        class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Por categoría</h3>
+        <template x-for="cat in annualCategories" :key="cat.name">
+          <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
+            <span class="text-sm text-gray-700" x-text="catEmoji(cat.name) + ' ' + cat.name"></span>
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-gray-400" x-text="Math.round(cat.amount / annualTotal * 100) + '%'"></span>
+              <span class="text-sm font-semibold text-gray-800 w-20 text-right" x-text="fmtAmount(cat.amount)"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div x-show="!annualLoading && annualCategories.length === 0" class="mt-8 text-center py-12 text-gray-400">
+        <p class="text-4xl mb-3">📅</p>
+        <p class="font-medium text-gray-500">Sin datos para <span x-text="annualYear"></span></p>
+      </div>
+    </div>
+
   </main>
 
   <!-- Bottom navigation -->
   <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-40">
-    <div class="max-w-2xl mx-auto px-4 flex">
+    <div class="max-w-2xl mx-auto flex">
       <button @click="view = 'dashboard'; refreshDashboard()"
-        class="bottom-nav-item flex-1 flex flex-col items-center py-3 gap-1"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'dashboard' ? 'text-indigo-600' : 'text-gray-400'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
         </svg>
-        <span class="text-xs font-medium">Inicio</span>
+        <span class="text-[10px] font-medium">Inicio</span>
       </button>
       <button @click="view = 'upload'; uploadResult = null; titularConfirmed = false"
-        class="bottom-nav-item flex-1 flex flex-col items-center py-3 gap-1"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'upload' ? 'text-indigo-600' : 'text-gray-400'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
         </svg>
-        <span class="text-xs font-medium">Subir</span>
+        <span class="text-[10px] font-medium">Subir</span>
+      </button>
+      <button @click="view = 'search'; searchQuery = ''; searchResults = []"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
+        :class="view === 'search' ? 'text-indigo-600' : 'text-gray-400'">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <span class="text-[10px] font-medium">Buscar</span>
+      </button>
+      <button @click="view = 'annual'; loadAnnual()"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
+        :class="view === 'annual' ? 'text-indigo-600' : 'text-gray-400'">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <span class="text-[10px] font-medium">Anual</span>
       </button>
       <button @click="view = 'history'; loadHistoryMonths()"
-        class="bottom-nav-item flex-1 flex flex-col items-center py-3 gap-1"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'history' ? 'text-indigo-600' : 'text-gray-400'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
         </svg>
-        <span class="text-xs font-medium">Historial</span>
+        <span class="text-[10px] font-medium">Historial</span>
       </button>
       <button @click="view = 'personas'; loadPersonas()"
-        class="bottom-nav-item flex-1 flex flex-col items-center py-3 gap-1"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'personas' ? 'text-indigo-600' : 'text-gray-400'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
             d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
-        <span class="text-xs font-medium">Personas</span>
+        <span class="text-[10px] font-medium">Personas</span>
       </button>
     </div>
   </nav>
@@ -534,6 +660,24 @@ function app() {
     personasSummary: [],
     personasLoading: false,
 
+    // Search
+    searchQuery: '',
+    searchResults: [],
+    searchLoading: false,
+
+    // Annual
+    annualYear: new Date().getFullYear(),
+    annualCategories: [],
+    annualMonths: [],
+    annualTotal: 0,
+    annualMaxMonth: 1,
+    annualLoading: false,
+
+    // Trend (dashboard)
+    trendMonths: [],
+    trendTotals: [],
+    trendChart: null,
+
     categories: Object.keys(CATEGORY_EMOJIS),
 
     async init() {
@@ -608,9 +752,9 @@ function app() {
           .filter(([name]) => !name.startsWith('__'))
           .map(([name, amount]) => ({ name, amount }))
           .sort((a, b) => b.amount - a.amount);
-        this.$nextTick(() => this.renderChart());
-        // Pre-load transactions for drill-down
+        // Pre-load transactions for drill-down and trend chart
         this._loadDashTxs();
+        this.loadTrend();
       } catch (e) {
         this.showToast('Error cargando datos', true);
       } finally {
@@ -836,6 +980,105 @@ function app() {
         this.showToast('Error cargando personas', true);
       } finally {
         this.personasLoading = false;
+      }
+    },
+
+    // ── Trend chart ────────────────────────────────────────
+
+    async loadTrend() {
+      try {
+        let url = '/api/monthly_totals';
+        if (this.activePerson) url += `?titular=${encodeURIComponent(this.activePerson)}`;
+        const r = await fetch(url);
+        const data = await r.json();
+        this.trendMonths = data.months || [];
+        this.trendTotals = data.totals || [];
+        this.$nextTick(() => this.renderTrendChart());
+      } catch {}
+    },
+
+    renderTrendChart() {
+      const canvas = document.getElementById('trendChart');
+      if (!canvas || !this.trendMonths.length) return;
+      if (this.trendChart) this.trendChart.destroy();
+      const labels = this.trendMonths.map(m => {
+        const [y, mo] = m.split('-');
+        return new Date(+y, +mo - 1, 1).toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
+      });
+      // Highlight current dashboard month
+      const currentKey = `${this.dashYear}-${String(this.dashMonth).padStart(2,'0')}`;
+      const bgColors = this.trendMonths.map(m => m === currentKey ? '#6366f1' : '#c7d2fe');
+      this.trendChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ data: this.trendTotals, backgroundColor: bgColors, borderRadius: 6 }],
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + this.fmtAmount(ctx.raw) } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+            y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 10 }, callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v } },
+          },
+        },
+      });
+    },
+
+    // ── Search ─────────────────────────────────────────────
+
+    async doSearch() {
+      if (this.searchQuery.length < 2) { this.searchResults = []; return; }
+      this.searchLoading = true;
+      try {
+        let url = `/api/search?q=${encodeURIComponent(this.searchQuery)}`;
+        if (this.activePerson) url += `&titular=${encodeURIComponent(this.activePerson)}`;
+        const r = await fetch(url);
+        const data = await r.json();
+        this.searchResults = data.transactions || [];
+      } catch {} finally {
+        this.searchLoading = false;
+      }
+    },
+
+    // ── Annual ─────────────────────────────────────────────
+
+    async loadAnnual() {
+      this.annualLoading = true;
+      this.annualCategories = [];
+      this.annualMonths = [];
+      this.annualTotal = 0;
+      try {
+        const months = Array.from({length: 12}, (_, i) => i + 1);
+        const results = await Promise.all(months.map(async m => {
+          let url = `/api/summary?year=${this.annualYear}&month=${m}`;
+          if (this.activePerson) url += `&titular=${encodeURIComponent(this.activePerson)}`;
+          const r = await fetch(url);
+          return r.json();
+        }));
+        const catTotals = {};
+        const monthTotals = [];
+        for (let i = 0; i < 12; i++) {
+          const d = results[i];
+          const monthTotal = d.total || 0;
+          if (monthTotal > 0) {
+            const key = `${this.annualYear}-${String(i+1).padStart(2,'0')}`;
+            monthTotals.push({ month: key, total: monthTotal });
+          }
+          for (const [cat, amt] of Object.entries(d.summary || {})) {
+            catTotals[cat] = (catTotals[cat] || 0) + amt;
+          }
+        }
+        this.annualMonths = monthTotals;
+        this.annualMaxMonth = Math.max(...monthTotals.map(m => m.total), 1);
+        this.annualCategories = Object.entries(catTotals)
+          .map(([name, amount]) => ({ name, amount }))
+          .sort((a, b) => b.amount - a.amount);
+        this.annualTotal = this.annualMonths.reduce((s, m) => s + m.total, 0);
+      } catch (e) {
+        this.showToast('Error cargando datos anuales', true);
+      } finally {
+        this.annualLoading = false;
       }
     },
 

@@ -174,4 +174,55 @@ async def get_months(titular: str = None):
     return {'months': sheets.get_months_with_data(titular=titular or None)}
 
 
+@app.get("/api/monthly_totals")
+async def get_monthly_totals(titular: str = None):
+    rows = sheets._get_all_records()
+    totals: dict[str, float] = {}
+    for r in rows:
+        mes = r.get('Mes', '')
+        if not mes or r.get('Tipo') != 'expense':
+            continue
+        if titular and r.get('Titular', '') != titular:
+            continue
+        try:
+            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        except ValueError:
+            continue
+        totals[mes] = totals.get(mes, 0.0) + amt
+    sorted_months = sorted(totals.keys())
+    return {'months': sorted_months, 'totals': [round(totals[m], 2) for m in sorted_months]}
+
+
+@app.get("/api/search")
+async def search_transactions(q: str = '', titular: str = None):
+    if len(q) < 2:
+        return {'transactions': []}
+    q_up = q.upper()
+    rows = sheets._get_all_records()
+    results = []
+    for r in rows:
+        if r.get('Tipo') not in ('expense', 'income'):
+            continue
+        if titular and r.get('Titular', '') != titular:
+            continue
+        desc = r.get('Descripción', '')
+        if q_up not in desc.upper() and q_up not in r.get('Categoría', '').upper():
+            continue
+        try:
+            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        except ValueError:
+            amt = 0.0
+        results.append({
+            'date': r.get('Fecha', ''),
+            'description': desc,
+            'amount': amt,
+            'category': r.get('Categoría', 'Otros'),
+            'bank': r.get('Banco', ''),
+            'titular': r.get('Titular', ''),
+            'mes': r.get('Mes', ''),
+        })
+    results.sort(key=lambda x: x.get('mes', '') + x.get('date', ''), reverse=True)
+    return {'transactions': results[:150]}
+
+
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
