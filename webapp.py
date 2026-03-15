@@ -174,6 +174,33 @@ async def get_months(titular: str = None):
     return {'months': sheets.get_months_with_data(titular=titular or None)}
 
 
+@app.get("/api/annual")
+async def get_annual(year: int = None, titular: str = None):
+    now = datetime.now()
+    year = year or now.year
+    rows = sheets._get_all_records()
+    cat_totals: dict[str, float] = {}
+    month_totals: dict[str, float] = {}
+    for r in rows:
+        if r.get('Tipo') != 'expense':
+            continue
+        mes = r.get('Mes', '')
+        if not mes.startswith(str(year)):
+            continue
+        if titular and r.get('Titular', '') != titular:
+            continue
+        try:
+            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        except ValueError:
+            continue
+        cat = r.get('Categoría', 'Otros')
+        cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
+        month_totals[mes] = month_totals.get(mes, 0.0) + amt
+    sorted_months = [{'month': m, 'total': round(month_totals[m], 2)} for m in sorted(month_totals)]
+    sorted_cats = sorted([{'name': k, 'amount': round(v, 2)} for k, v in cat_totals.items()], key=lambda x: -x['amount'])
+    return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': round(sum(cat_totals.values()), 2)}
+
+
 @app.get("/api/monthly_totals")
 async def get_monthly_totals(titular: str = None):
     rows = sheets._get_all_records()

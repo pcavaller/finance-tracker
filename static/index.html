@@ -1047,32 +1047,14 @@ function app() {
       this.annualMonths = [];
       this.annualTotal = 0;
       try {
-        const months = Array.from({length: 12}, (_, i) => i + 1);
-        const results = await Promise.all(months.map(async m => {
-          let url = `/api/summary?year=${this.annualYear}&month=${m}`;
-          if (this.activePerson) url += `&titular=${encodeURIComponent(this.activePerson)}`;
-          const r = await fetch(url);
-          return r.json();
-        }));
-        const catTotals = {};
-        const monthTotals = [];
-        for (let i = 0; i < 12; i++) {
-          const d = results[i];
-          const monthTotal = d.total || 0;
-          if (monthTotal > 0) {
-            const key = `${this.annualYear}-${String(i+1).padStart(2,'0')}`;
-            monthTotals.push({ month: key, total: monthTotal });
-          }
-          for (const [cat, amt] of Object.entries(d.summary || {})) {
-            catTotals[cat] = (catTotals[cat] || 0) + amt;
-          }
-        }
-        this.annualMonths = monthTotals;
-        this.annualMaxMonth = Math.max(...monthTotals.map(m => m.total), 1);
-        this.annualCategories = Object.entries(catTotals)
-          .map(([name, amount]) => ({ name, amount }))
-          .sort((a, b) => b.amount - a.amount);
-        this.annualTotal = this.annualMonths.reduce((s, m) => s + m.total, 0);
+        let url = `/api/annual?year=${this.annualYear}`;
+        if (this.activePerson) url += `&titular=${encodeURIComponent(this.activePerson)}`;
+        const r = await fetch(url);
+        const data = await r.json();
+        this.annualCategories = data.categories || [];
+        this.annualMonths = data.months || [];
+        this.annualTotal = data.total || 0;
+        this.annualMaxMonth = Math.max(...(data.months || []).map(m => m.total), 1);
       } catch (e) {
         this.showToast('Error cargando datos anuales', true);
       } finally {
