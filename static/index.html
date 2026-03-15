@@ -138,6 +138,24 @@
         </template>
       </div>
 
+      <!-- Income breakdown -->
+      <div x-show="!dashLoading && dashIncome > 0" class="mt-4 bg-green-50 rounded-2xl border border-green-100 p-5">
+        <h2 class="text-sm font-semibold text-green-700 uppercase tracking-wide mb-3">📥 Ingresos recibidos</h2>
+        <template x-for="item in dashIncomeItems" :key="item.description + item.date">
+          <div class="flex justify-between items-center py-1.5 border-b border-green-100 last:border-0">
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-gray-700 truncate" x-text="item.description"></p>
+              <p class="text-xs text-gray-400" x-text="item.date"></p>
+            </div>
+            <span class="text-xs font-semibold text-green-600 ml-3 shrink-0" x-text="'+' + fmtAmount(item.amount)"></span>
+          </div>
+        </template>
+        <div class="flex justify-between items-center mt-2 pt-2 border-t border-green-200">
+          <span class="text-sm font-semibold text-green-700">Total ingresos</span>
+          <span class="text-sm font-bold text-green-600" x-text="'+' + fmtAmount(dashIncome)"></span>
+        </div>
+      </div>
+
       <!-- Chart -->
       <div x-show="!dashLoading && dashCategories.length > 0" class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Distribución</h2>
@@ -487,6 +505,8 @@ function app() {
     dashMonth: new Date().getMonth() + 1,
     dashTotal: 0,
     dashCategories: [],
+    dashIncome: 0,
+    dashIncomeItems: [],
     dashLoading: false,
     dashChart: null,
     dashTxs: [],
@@ -582,6 +602,8 @@ function app() {
         const r = await fetch(url);
         const data = await r.json();
         this.dashTotal = data.total || 0;
+        this.dashIncome = data.income || 0;
+        this.dashIncomeItems = data.income_items || [];
         this.dashCategories = Object.entries(data.summary || {})
           .filter(([name]) => !name.startsWith('__'))
           .map(([name, amount]) => ({ name, amount }))

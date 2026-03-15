@@ -138,7 +138,26 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
     month = month or now.month
     summary = sheets.get_monthly_summary(year, month, titular=titular or None)
     total = summary.pop('__total__', 0.0)
-    return {'summary': summary, 'total': total, 'year': year, 'month': month}
+    income = summary.pop('__income__', 0.0)
+
+    month_str = f"{year:04d}-{month:02d}"
+    income_items = []
+    for r in sheets._get_all_records():
+        if r.get('Mes') != month_str or r.get('Tipo') != 'income':
+            continue
+        desc = r.get('Descripción', '')
+        if 'NOMINA' in desc.upper() or 'NÓMINA' in desc.upper():
+            continue
+        if titular and r.get('Titular', '') != titular:
+            continue
+        try:
+            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        except ValueError:
+            continue
+        income_items.append({'description': desc, 'amount': amt, 'date': r.get('Fecha', '')})
+    income_items.sort(key=lambda x: x['amount'], reverse=True)
+
+    return {'summary': summary, 'total': total, 'income': income, 'income_items': income_items, 'year': year, 'month': month}
 
 
 @app.get("/api/transactions")
