@@ -110,8 +110,8 @@ class SheetsClient:
                 total_expenses += amount
             elif tipo == 'income':
                 desc = row.get('Descripción', '').upper()
-                # Exclude salary and DiverInvest payments (nómina + bonus)
-                if 'NÓMINA' not in desc and 'NOMINA' not in desc and 'DIVERINVEST' not in desc:
+                # Exclude salary (nómina + bonus)
+                if 'NÓMINA' not in desc and 'NOMINA' not in desc:
                     summary['__income__'] = summary.get('__income__', 0.0) + amount
                     total_income += amount
         summary['__total__'] = total_expenses - total_income

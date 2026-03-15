@@ -210,7 +210,6 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         and r.get('Tipo') == 'income'
         and 'NOMINA' not in r.get('Descripción', '').upper()
         and 'NÓMINA' not in r.get('Descripción', '').upper()
-        and 'DIVERINVEST' not in r.get('Descripción', '').upper()
     ]
 
     lines = [f"<b>📊 Resumen {year}-{month:02d}</b>\n"]
