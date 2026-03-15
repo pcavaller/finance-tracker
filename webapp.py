@@ -146,7 +146,8 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
         if r.get('Mes') != month_str or r.get('Tipo') != 'income':
             continue
         desc = r.get('Descripción', '')
-        if 'NOMINA' in desc.upper() or 'NÓMINA' in desc.upper():
+        desc_up = desc.upper()
+        if 'NOMINA' in desc_up or 'NÓMINA' in desc_up or 'DIVERINVEST' in desc_up:
             continue
         if titular and r.get('Titular', '') != titular:
             continue
@@ -199,7 +200,7 @@ async def get_annual(year: int = None, titular: str = None):
             month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
         elif tipo == 'income':
             desc = r.get('Descripción', '').upper()
-            if 'NOMINA' not in desc and 'NÓMINA' not in desc:
+            if 'NOMINA' not in desc and 'NÓMINA' not in desc and 'DIVERINVEST' not in desc:
                 month_income[mes] = month_income.get(mes, 0.0) + amt
     all_months = sorted(set(list(month_expenses.keys()) + list(month_income.keys())))
     sorted_months = [{'month': m, 'total': round(month_expenses.get(m, 0) - month_income.get(m, 0), 2)} for m in all_months if month_expenses.get(m, 0) > 0]

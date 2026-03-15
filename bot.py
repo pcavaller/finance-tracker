@@ -116,11 +116,12 @@ def get_session(user_data: dict) -> dict | None:
     return user_data.get('session')
 
 
-def set_session(user_data: dict, expenses: list[Transaction], bank: str, excluded: int):
+def set_session(user_data: dict, expenses: list[Transaction], bank: str, excluded: int, titular: str = ''):
     user_data['session'] = {
         'expenses': expenses,
         'bank': bank,
         'excluded': excluded,
+        'titular': titular,
     }
 
 
@@ -202,6 +203,16 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     income = summary.pop('__income__', 0.0)
     total_expenses = total + income  # total is already net (expenses - income)
 
+    # Fetch individual income items (excluding nómina)
+    income_rows = [
+        r for r in sheets._get_all_records()
+        if r.get('Mes') == f"{year:04d}-{month:02d}"
+        and r.get('Tipo') == 'income'
+        and 'NOMINA' not in r.get('Descripción', '').upper()
+        and 'NÓMINA' not in r.get('Descripción', '').upper()
+        and 'DIVERINVEST' not in r.get('Descripción', '').upper()
+    ]
+
     lines = [f"<b>📊 Resumen {year}-{month:02d}</b>\n"]
     for cat, amount in sorted(summary.items(), key=lambda x: -x[1]):
         emoji = CATEGORY_EMOJI.get(cat, '📦')
@@ -210,6 +221,10 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{emoji} {h(cat)}: <b>{h(fmt_eur(amount))}</b>  {bar} {pct:.0f}%")
     if income > 0:
         lines.append(f"\n📥 <b>Ingresos recibidos: +{h(fmt_eur(income))}</b>")
+        for r in sorted(income_rows, key=lambda x: abs(float(str(x.get('Importe', 0)).replace(',', '.'))), reverse=True):
+            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+            desc = r.get('Descripción', '')[:40]
+            lines.append(f"  · {h(desc)}: +{h(fmt_eur(amt))}")
     lines.append(f"💰 <b>Gasto neto: {h(fmt_eur(total))}</b>")
 
     await msg.edit_text("\n".join(lines), parse_mode='HTML')
@@ -353,6 +368,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not any(c.isdigit() for c in text):
         return
 
+    # Detect optional "Nombre: gasto" prefix
+    typed_name = None
+    m_titular = re.match(r'^([A-Za-záéíóúÁÉÍÓÚñÑ][\w\s]{1,30}):\s*(.+)', text)
+    if m_titular:
+        typed_name = m_titular.group(1).strip()
+        text = m_titular.group(2).strip()
+
     msg = await update.message.reply_text("⏳ Procesando...")
 
     try:
@@ -373,24 +395,50 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             category=category,
         )
 
-        set_session(context.user_data, [tx], 'Efectivo', 0)
-        emoji = CATEGORY_EMOJI.get(category, '📦')
+        # Resolve titular via fuzzy match
+        if typed_name:
+            all_titulars = sheets.get_titulares() or ['Pablo Cavaller']
+            name_up = typed_name.upper()
+            matches = [t for t in all_titulars if name_up in t.upper() or t.upper().split()[0] in name_up]
+            if len(matches) == 1:
+                titular = matches[0]
+            elif len(matches) == 0:
+                titular = typed_name  # new person, use as-is
+            else:
+                # Ambiguous — ask user to pick
+                set_session(context.user_data, [tx], 'Efectivo', 0, titular='')
+                buttons = [[InlineKeyboardButton(t, callback_data=f"titular:{t}")] for t in matches]
+                buttons.append([InlineKeyboardButton("🗑 Cancelar", callback_data="cancel_all")])
+                await msg.edit_text(
+                    f"👤 ¿A quién corresponde este gasto?",
+                    reply_markup=InlineKeyboardMarkup(buttons),
+                )
+                return
+        else:
+            titular = 'Pablo Cavaller'
 
-        await msg.edit_text(
-            f"<b>💵 Gasto en efectivo</b>\n\n"
-            f"🏪 {h(description)}\n"
-            f"💶 <b>{h(fmt_eur(amount))}</b>\n"
-            f"📂 {emoji} {h(category)}",
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Confirmar", callback_data="ok:0"),
-                InlineKeyboardButton("📂 Cambiar", callback_data="change:0"),
-                InlineKeyboardButton("🗑 Cancelar", callback_data="cancel_all"),
-            ]]),
-        )
+        set_session(context.user_data, [tx], 'Efectivo', 0, titular=titular)
+        await _show_cash_confirm(msg, tx, titular)
 
     except Exception as e:
         await msg.edit_text(f"❌ Error: {h(str(e))}", parse_mode='HTML')
+
+
+async def _show_cash_confirm(msg, tx: Transaction, titular: str):
+    emoji = CATEGORY_EMOJI.get(tx.category, '📦')
+    titular_label = f"\n👤 {h(titular)}" if titular != 'Pablo Cavaller' else ''
+    await msg.edit_text(
+        f"<b>💵 Gasto en efectivo</b>\n\n"
+        f"🏪 {h(tx.description)}\n"
+        f"💶 <b>{h(fmt_eur(tx.amount))}</b>\n"
+        f"📂 {emoji} {h(tx.category)}{titular_label}",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Confirmar", callback_data="ok:0"),
+            InlineKeyboardButton("📂 Cambiar", callback_data="change:0"),
+            InlineKeyboardButton("🗑 Cancelar", callback_data="cancel_all"),
+        ]]),
+    )
 
 
 # ── Callback handler ───────────────────────────────────────────────────────────
@@ -400,6 +448,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     session = get_session(context.user_data)
+
+    # ── Titular selection (ambiguous cash expense) ─────────────────────────────
+    if data.startswith('titular:'):
+        titular = data[len('titular:'):]
+        if not session:
+            await query.edit_message_text("❌ Sesión expirada.")
+            return
+        session['titular'] = titular
+        tx = session['expenses'][0]
+        await _show_cash_confirm(query.message, tx, titular)
+        return
 
     # ── Confirm all (after initial summary screen) ─────────────────────────────
     if data == 'confirm_all':
@@ -511,7 +570,8 @@ async def _advance(query, context, session, expenses, idx):
 async def _save_and_done(query, context, expenses):
     """Write expenses to Google Sheets and confirm."""
     await query.edit_message_text("⏳ Guardando en Google Sheets...")
-    saved = sheets.write_transactions(expenses)
+    titular = get_session(context.user_data).get('titular', 'Pablo Cavaller')
+    saved = sheets.write_transactions(expenses, titular=titular)
     duplicates = len(expenses) - saved
     total = sum(tx.amount for tx in expenses[:saved]) if saved else 0
     clear_session(context.user_data)
