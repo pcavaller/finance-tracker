@@ -686,6 +686,10 @@ function app() {
         window.Telegram.WebApp.ready();
         window.Telegram.WebApp.expand();
       }
+      // Watch for trend data — render chart after Alpine updates DOM
+      this.$watch('trendMonths', () => {
+        requestAnimationFrame(() => requestAnimationFrame(() => this.renderTrendChart()));
+      });
       await this.loadPeople();
       await this.refreshDashboard();
     },
@@ -993,16 +997,14 @@ function app() {
         const data = await r.json();
         this.trendMonths = data.months || [];
         this.trendTotals = data.totals || [];
-        // Wait for Alpine x-show to make canvas visible before rendering
-        setTimeout(() => this.renderTrendChart(), 100);
+        // $watch handles rendering after DOM update
       } catch {}
     },
 
     renderTrendChart() {
       const canvas = document.getElementById('trendChart');
       if (!canvas || !this.trendMonths.length) return;
-      // If canvas has no dimensions yet, retry
-      if (canvas.offsetWidth === 0) { setTimeout(() => this.renderTrendChart(), 100); return; }
+      if (canvas.offsetWidth === 0) return; // still hidden, $watch will retry
       if (this.trendChart) this.trendChart.destroy();
       const labels = this.trendMonths.map(m => {
         const [y, mo] = m.split('-');
