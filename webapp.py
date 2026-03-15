@@ -180,10 +180,9 @@ async def get_annual(year: int = None, titular: str = None):
     year = year or now.year
     rows = sheets._get_all_records()
     cat_totals: dict[str, float] = {}
-    month_totals: dict[str, float] = {}
+    month_expenses: dict[str, float] = {}
+    month_income: dict[str, float] = {}
     for r in rows:
-        if r.get('Tipo') != 'expense':
-            continue
         mes = r.get('Mes', '')
         if not mes.startswith(str(year)):
             continue
@@ -193,12 +192,20 @@ async def get_annual(year: int = None, titular: str = None):
             amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
         except ValueError:
             continue
-        cat = r.get('Categoría', 'Otros')
-        cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
-        month_totals[mes] = month_totals.get(mes, 0.0) + amt
-    sorted_months = [{'month': m, 'total': round(month_totals[m], 2)} for m in sorted(month_totals)]
+        tipo = r.get('Tipo', '')
+        if tipo == 'expense':
+            cat = r.get('Categoría', 'Otros')
+            cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
+            month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
+        elif tipo == 'income':
+            desc = r.get('Descripción', '').upper()
+            if 'NOMINA' not in desc and 'NÓMINA' not in desc:
+                month_income[mes] = month_income.get(mes, 0.0) + amt
+    all_months = sorted(set(list(month_expenses.keys()) + list(month_income.keys())))
+    sorted_months = [{'month': m, 'total': round(month_expenses.get(m, 0) - month_income.get(m, 0), 2)} for m in all_months if month_expenses.get(m, 0) > 0]
     sorted_cats = sorted([{'name': k, 'amount': round(v, 2)} for k, v in cat_totals.items()], key=lambda x: -x['amount'])
-    return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': round(sum(cat_totals.values()), 2)}
+    net_total = round(sum(m['total'] for m in sorted_months), 2)
+    return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': net_total}
 
 
 @app.get("/api/monthly_totals")
