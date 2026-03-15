@@ -993,13 +993,16 @@ function app() {
         const data = await r.json();
         this.trendMonths = data.months || [];
         this.trendTotals = data.totals || [];
-        this.$nextTick(() => this.renderTrendChart());
+        // Wait for Alpine x-show to make canvas visible before rendering
+        setTimeout(() => this.renderTrendChart(), 100);
       } catch {}
     },
 
     renderTrendChart() {
       const canvas = document.getElementById('trendChart');
       if (!canvas || !this.trendMonths.length) return;
+      // If canvas has no dimensions yet, retry
+      if (canvas.offsetWidth === 0) { setTimeout(() => this.renderTrendChart(), 100); return; }
       if (this.trendChart) this.trendChart.destroy();
       const labels = this.trendMonths.map(m => {
         const [y, mo] = m.split('-');
