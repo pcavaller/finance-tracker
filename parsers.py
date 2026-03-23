@@ -74,6 +74,8 @@ OWN_ACCOUNT_KEYWORDS = [
     'BGET',
     'BUTGET',
     'TRADE REPUBLIC',
+    'PAYOUT TO TRANSIT',
+    'PAYOUT TO TRANSIT ACCOUNT',
 ]
 
 
@@ -147,7 +149,8 @@ def _clean_openbank_desc(concepto: str) -> str:
 
 
 def detect_bank(filename: str) -> str:
-    name = filename.lower()
+    import os
+    name = os.path.basename(filename).lower()
     if 'extracto' in name or 'trade' in name or 'republic' in name:
         return 'trade_republic'
     if 'movimientos' in name or 'openbank' in name or 'cuenta' in name:

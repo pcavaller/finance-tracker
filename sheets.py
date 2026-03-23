@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 from typing import TYPE_CHECKING
 
 import gspread
@@ -47,13 +48,25 @@ class SheetsClient:
             })
         return ws
 
+    _cache_data: list[dict] = []
+    _cache_ts: float = 0.0
+    _CACHE_TTL: float = 60.0
+
     def _get_all_records(self) -> list[dict]:
-        """Fetch all records with unformatted numeric values (avoids locale issues)."""
+        """Fetch all records with unformatted numeric values. Cached for 60s."""
+        now = time.time()
+        if self._cache_data and (now - self._cache_ts) < self._CACHE_TTL:
+            return self._cache_data
         values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')
         if not values:
             return []
         headers = values[0]
-        return [dict(zip(headers, row)) for row in values[1:]]
+        self._cache_data = [dict(zip(headers, row)) for row in values[1:]]
+        self._cache_ts = now
+        return self._cache_data
+
+    def _invalidate_cache(self) -> None:
+        self._cache_ts = 0.0
 
     def _existing_keys(self) -> set[tuple]:
         """Returns set of (fecha, descripcion, importe, banco) for all stored rows."""
@@ -85,6 +98,7 @@ class SheetsClient:
             existing.add(key)  # avoid dupes within the same batch
         if rows:
             self.ws.append_rows(rows)
+            self._invalidate_cache()
         return len(rows)
 
     def get_monthly_summary(self, year: int, month: int, titular: str = None) -> dict:
@@ -180,3 +194,34 @@ class SheetsClient:
         existing = [kw for kw, _ in self.get_custom_rules()]
         if keyword.upper() not in existing:
             self.ws_reglas.append_row([keyword.upper(), category])
+
+    def update_transaction_category(self, fecha: str, descripcion: str, amount: float, banco: str, new_category: str) -> bool:
+        """Find a transaction by (fecha, descripcion, abs(amount), banco) and update its category."""
+        values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')
+        if not values:
+            return False
+        headers = values[0]
+        try:
+            fecha_col = headers.index('Fecha')
+            desc_col = headers.index('Descripción')
+            importe_col = headers.index('Importe')
+            banco_col = headers.index('Banco')
+            cat_col = headers.index('Categoría') + 1  # 1-indexed for update_cell
+        except ValueError:
+            return False
+        target_amount = round(abs(amount), 2)
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) <= max(fecha_col, desc_col, importe_col, banco_col):
+                continue
+            try:
+                row_amount = round(abs(float(str(row[importe_col]).replace(',', '.'))), 2)
+            except ValueError:
+                continue
+            if (row[fecha_col] == fecha and
+                    row[desc_col] == descripcion and
+                    row_amount == target_amount and
+                    row[banco_col] == banco):
+                self.ws.update_cell(i, cat_col, new_category)
+                self._invalidate_cache()
+                return True
+        return False

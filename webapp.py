@@ -228,6 +228,24 @@ async def get_monthly_totals(titular: str = None):
     return {'months': sorted_months, 'totals': [round(totals[m], 2) for m in sorted_months]}
 
 
+class UpdateCategoryRequest(BaseModel):
+    fecha: str
+    descripcion: str
+    amount: float
+    banco: str
+    category: str
+
+
+@app.patch("/api/transaction/category")
+async def update_transaction_category(body: UpdateCategoryRequest):
+    ok = sheets.update_transaction_category(
+        body.fecha, body.descripcion, body.amount, body.banco, body.category
+    )
+    if not ok:
+        raise HTTPException(404, "Transacción no encontrada.")
+    return {"ok": True}
+
+
 @app.get("/api/search")
 async def search_transactions(q: str = '', titular: str = None):
     if len(q) < 2:
