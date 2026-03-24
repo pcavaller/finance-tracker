@@ -597,27 +597,23 @@ async def _save_and_done(query, context, expenses):
 
 # ── Heartbeat ──────────────────────────────────────────────────────────────────
 
-def _start_heartbeat(bot, interval: int = 300, timeout: int = 20, retries: int = 2):
-    """Background thread: calls getMe() every `interval` seconds.
+def _start_heartbeat(token: str, interval: int = 300, timeout: int = 20, retries: int = 2):
+    """Background thread: pings Telegram getMe via raw HTTP every `interval` seconds.
     Exits the process if it fails `retries` times in a row, letting systemd restart."""
-    import asyncio
+    import urllib.request
+    import urllib.error
+
+    url = f"https://api.telegram.org/bot{token}/getMe"
 
     def _run():
-        fails = 0
         while True:
             time.sleep(interval)
             for attempt in range(retries):
                 try:
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(
-                        asyncio.wait_for(bot.get_me(), timeout=timeout)
-                    )
-                    loop.close()
-                    fails = 0
+                    urllib.request.urlopen(url, timeout=timeout)
                     break
                 except Exception as e:
-                    fails += 1
-                    print(f"Heartbeat fail {fails} ({e})")
+                    print(f"Heartbeat fail {attempt + 1} ({e})")
                     time.sleep(5)
             else:
                 print("Heartbeat: no response after retries — exiting for systemd restart")
@@ -659,7 +655,7 @@ def main():
     async def on_startup(app):
         if OWNER_CHAT_ID:
             await app.bot.send_message(chat_id=OWNER_CHAT_ID, text="🤖 Finance bot iniciado")
-        _start_heartbeat(app.bot)
+        _start_heartbeat(TELEGRAM_TOKEN)
 
     app.post_init = on_startup
     print("🤖 Finance bot iniciado. Ctrl+C para parar.")
