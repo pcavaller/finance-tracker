@@ -24,7 +24,14 @@ from sheets import SheetsClient
 import re as _re
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+OWNER_CHAT_ID = os.getenv('OWNER_CHAT_ID')
 WEBAPP_URL = os.getenv('WEBAPP_URL', '')
+
+# Aliases de titulares: cualquier variante → nombre canónico guardado en Sheets
+NAME_ALIASES: dict[str, str] = {
+    'MERI': 'María',
+    'MARIA': 'María',
+}
 sheets = SheetsClient(
     os.getenv('GOOGLE_CREDENTIALS_PATH'),
     os.getenv('GOOGLE_SHEET_ID'),
@@ -369,7 +376,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Detect optional "Nombre: gasto" prefix
     typed_name = None
-    m_titular = re.match(r'^([A-Za-záéíóúÁÉÍÓÚñÑ][\w\s]{1,30}):\s*(.+)', text)
+    m_titular = _re.match(r'^([A-Za-záéíóúÁÉÍÓÚñÑ][\w\s]{1,30}):\s*(.+)', text)
     if m_titular:
         typed_name = m_titular.group(1).strip()
         text = m_titular.group(2).strip()
@@ -394,8 +401,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             category=category,
         )
 
-        # Resolve titular via fuzzy match
+        # Resolve titular via alias table + fuzzy match
         if typed_name:
+            canonical = NAME_ALIASES.get(typed_name.upper())
+            if canonical:
+                typed_name = canonical
             all_titulars = sheets.get_titulares() or ['Pablo Cavaller']
             name_up = typed_name.upper()
             matches = [t for t in all_titulars if name_up in t.upper() or t.upper().split()[0] in name_up]
@@ -594,8 +604,19 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
 
+    async def on_startup(app):
+        if OWNER_CHAT_ID:
+            await app.bot.send_message(chat_id=OWNER_CHAT_ID, text="🤖 Finance bot iniciado")
+
+    app.post_init = on_startup
     print("🤖 Finance bot iniciado. Ctrl+C para parar.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30,
+        pool_timeout=30,
+    )
 
 
 if __name__ == '__main__':
