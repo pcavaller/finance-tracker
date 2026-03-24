@@ -4,6 +4,8 @@
 import os
 import sys
 import tempfile
+import threading
+import time
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -593,6 +595,38 @@ async def _save_and_done(query, context, expenses):
     await query.edit_message_text(msg, parse_mode='HTML')
 
 
+# ── Heartbeat ──────────────────────────────────────────────────────────────────
+
+def _start_heartbeat(bot, interval: int = 300, timeout: int = 20, retries: int = 2):
+    """Background thread: calls getMe() every `interval` seconds.
+    Exits the process if it fails `retries` times in a row, letting systemd restart."""
+    import asyncio
+
+    def _run():
+        fails = 0
+        while True:
+            time.sleep(interval)
+            for attempt in range(retries):
+                try:
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(
+                        asyncio.wait_for(bot.get_me(), timeout=timeout)
+                    )
+                    loop.close()
+                    fails = 0
+                    break
+                except Exception as e:
+                    fails += 1
+                    print(f"Heartbeat fail {fails} ({e})")
+                    time.sleep(5)
+            else:
+                print("Heartbeat: no response after retries — exiting for systemd restart")
+                sys.exit(1)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -625,6 +659,7 @@ def main():
     async def on_startup(app):
         if OWNER_CHAT_ID:
             await app.bot.send_message(chat_id=OWNER_CHAT_ID, text="🤖 Finance bot iniciado")
+        _start_heartbeat(app.bot)
 
     app.post_init = on_startup
     print("🤖 Finance bot iniciado. Ctrl+C para parar.")
