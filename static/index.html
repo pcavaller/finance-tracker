@@ -371,7 +371,20 @@
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
                 <p class="text-xs text-gray-400 mt-0.5">
-                  <span x-text="tx.category"></span>
+                  <template x-if="editingTxKey !== txKey(tx)">
+                    <button @click.stop="editingTxKey = txKey(tx)"
+                      class="text-indigo-500 hover:underline" x-text="tx.category"></button>
+                  </template>
+                  <template x-if="editingTxKey === txKey(tx)">
+                    <select x-init="$el.focus()"
+                      @change="updateCategory(tx, $event.target.value); editingTxKey = null"
+                      @blur="editingTxKey = null"
+                      class="text-xs border border-indigo-300 rounded px-1 py-0.5 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
+                      <template x-for="c in categories" :key="c">
+                        <option :value="c" :selected="c === tx.category" x-text="catEmoji(c) + ' ' + c"></option>
+                      </template>
+                    </select>
+                  </template>
                   <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
                 </p>
               </div>
@@ -1128,6 +1141,7 @@ function app() {
         tx.category = newCat;
         this.showToast(`Movido a ${newCat}`);
         if (this.view === 'dashboard') await this.refreshDashboard();
+        else if (this.view === 'history') await this.loadHistory();
       } catch {
         this.showToast('Error al cambiar categoría', true);
       }
