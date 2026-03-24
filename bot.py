@@ -594,7 +594,15 @@ async def _save_and_done(query, context, expenses):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .get_updates_read_timeout(30)
+        .get_updates_write_timeout(30)
+        .get_updates_connect_timeout(30)
+        .get_updates_pool_timeout(30)
+        .build()
+    )
 
     app.add_handler(CommandHandler('start', cmd_start))
     app.add_handler(CommandHandler('resumen', cmd_resumen))
@@ -610,13 +618,7 @@ def main():
 
     app.post_init = on_startup
     print("🤖 Finance bot iniciado. Ctrl+C para parar.")
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES,
-        read_timeout=30,
-        write_timeout=30,
-        connect_timeout=30,
-        pool_timeout=30,
-    )
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == '__main__':
