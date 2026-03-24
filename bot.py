@@ -2,11 +2,13 @@
 """Finance Tracker Telegram Bot"""
 
 import os
+import sys
 import tempfile
 from datetime import datetime
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.error import NetworkError
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes,
@@ -611,6 +613,14 @@ def main():
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(handle_callback))
+
+    async def on_error(update, context):
+        if isinstance(context.error, NetworkError):
+            print(f"NetworkError: {context.error} — exiting for systemd restart")
+            sys.exit(1)
+        raise context.error
+
+    app.add_error_handler(on_error)
 
     async def on_startup(app):
         if OWNER_CHAT_ID:
