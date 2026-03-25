@@ -130,12 +130,9 @@
                       </div>
                       <div class="flex items-center gap-1.5 ml-3 shrink-0">
                         <span class="text-xs font-semibold text-gray-800" x-text="fmtAmount(tx.amount)"></span>
-                        <select :value="tx.category"
+                        <select x-html="categoryOptions(tx.category)"
                           @change="updateCategory(tx, $event.target.value)"
                           class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[110px]">
-                          <template x-for="c in categories" :key="c">
-                            <option :value="c" :selected="c === tx.category" x-text="catEmoji(c) + ' ' + c"></option>
-                          </template>
                         </select>
                       </div>
                     </div>
@@ -359,12 +356,9 @@
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
                 <div class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap">
-                  <select :value="tx.category"
+                  <select x-html="categoryOptions(tx.category)"
                     @change="updateCategory(tx, $event.target.value)"
                     class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
-                    <template x-for="c in categories" :key="c">
-                      <option :value="c" :selected="c === tx.category" x-text="catEmoji(c) + ' ' + c"></option>
-                    </template>
                   </select>
                   <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
                 </div>
@@ -450,12 +444,9 @@
               <div class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap">
                 <span x-text="tx.date"></span>
                 <span>·</span>
-                <select :value="tx.category"
+                <select x-html="categoryOptions(tx.category)"
                   @change="updateCategory(tx, $event.target.value)"
                   class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
-                  <template x-for="c in categories" :key="c">
-                    <option :value="c" :selected="c === tx.category" x-text="catEmoji(c) + ' ' + c"></option>
-                  </template>
                 </select>
                 <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
               </div>
@@ -1093,12 +1084,18 @@ function app() {
       return v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
     },
 
+    categoryOptions(current) {
+      return this.categories.map(c =>
+        `<option value="${c}"${c === current ? ' selected' : ''}>${this.catEmoji(c)} ${c}</option>`
+      ).join('');
+    },
+
     txKey(tx) {
       return `${tx.date}|${tx.description}|${tx.amount}`;
     },
 
     async updateCategory(tx, newCat) {
-      if (!newCat || newCat === tx.category) return;
+      if (!newCat) return;
       const oldCat = tx.category;
       try {
         const r = await fetch('/api/transaction/category', {
