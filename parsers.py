@@ -548,8 +548,17 @@ class RevolutPDFParser:
     X_ENTRANTE = 468
     X_SALDO = 525
 
-    _AMOUNT_RE = re.compile(r'^€(\d+(?:\.\d{2})?)$')
+    # Old format: "€15.00" (€ prefix, dot decimal)
+    # New format: "10,00€" (€ suffix, comma decimal, optional thousands dot)
+    _AMOUNT_RE = re.compile(r'^€[\d.]+$|^[\d.,]+€$')
     _DAY_RE = re.compile(r'^\d{1,2}$')
+
+    @staticmethod
+    def _parse_amount_str(s: str) -> float:
+        s = s.strip('€')
+        if ',' in s:
+            s = s.replace('.', '').replace(',', '.')
+        return float(s)
 
     def parse(self, pdf_path: str) -> list[Transaction]:
         transactions = []
@@ -586,8 +595,8 @@ class RevolutPDFParser:
 
         saliente_words = [w for w in first_line if self.X_SALIENTE <= w['x0'] < self.X_ENTRANTE and self._AMOUNT_RE.match(w['text'])]
         entrante_words = [w for w in first_line if self.X_ENTRANTE <= w['x0'] < self.X_SALDO and self._AMOUNT_RE.match(w['text'])]
-        saliente = float(self._AMOUNT_RE.match(saliente_words[0]['text']).group(1)) if saliente_words else None
-        entrante = float(self._AMOUNT_RE.match(entrante_words[0]['text']).group(1)) if entrante_words else None
+        saliente = self._parse_amount_str(saliente_words[0]['text']) if saliente_words else None
+        entrante = self._parse_amount_str(entrante_words[0]['text']) if entrante_words else None
 
         if saliente is None and entrante is None:
             return None

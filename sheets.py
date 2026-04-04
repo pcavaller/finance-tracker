@@ -68,11 +68,19 @@ class SheetsClient:
     def _invalidate_cache(self) -> None:
         self._cache_ts = 0.0
 
+    @staticmethod
+    def _amount_key(v) -> str:
+        """Normalize an amount to a consistent string key regardless of int/float representation."""
+        try:
+            return str(round(float(str(v).replace(',', '.')), 2))
+        except (ValueError, TypeError):
+            return str(v)
+
     def _existing_keys(self) -> set[tuple]:
-        """Returns set of (fecha, descripcion, importe, banco) for all stored rows."""
+        """Returns set of (fecha, descripcion, importe_normalized, banco) for all stored rows."""
         rows = self._get_all_records()
         return {
-            (r.get('Fecha', ''), r.get('Descripción', ''), str(r.get('Importe', '')), r.get('Banco', ''))
+            (r.get('Fecha', ''), r.get('Descripción', ''), self._amount_key(r.get('Importe', '')), r.get('Banco', ''))
             for r in rows
         }
 
@@ -82,7 +90,7 @@ class SheetsClient:
         rows = []
         for tx in transactions:
             importe = -tx.amount if tx.tx_type == 'expense' else tx.amount
-            key = (tx.fmt_date(), tx.description, str(importe), tx.bank)
+            key = (tx.fmt_date(), tx.description, self._amount_key(importe), tx.bank)
             if key in existing:
                 continue
             rows.append([
@@ -149,7 +157,7 @@ class SheetsClient:
                 'date': row.get('Fecha', ''),
                 'description': row.get('Descripción', ''),
                 'amount': amount,
-                'category': row.get('Categoría', 'Otros'),
+                'category': row.get('Categoría') or 'Otros',
                 'bank': row.get('Banco', ''),
                 'titular': row.get('Titular', ''),
             })

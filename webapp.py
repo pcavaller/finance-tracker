@@ -195,7 +195,7 @@ async def get_annual(year: int = None, titular: str = None):
             continue
         tipo = r.get('Tipo', '')
         if tipo == 'expense':
-            cat = r.get('Categoría', 'Otros')
+            cat = r.get('Categoría') or 'Otros'
             cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
             month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
         elif tipo == 'income':
@@ -269,7 +269,7 @@ async def search_transactions(q: str = '', titular: str = None):
             'date': r.get('Fecha', ''),
             'description': desc,
             'amount': amt,
-            'category': r.get('Categoría', 'Otros'),
+            'category': r.get('Categoría') or 'Otros',
             'bank': r.get('Banco', ''),
             'titular': r.get('Titular', ''),
             'mes': r.get('Mes', ''),
