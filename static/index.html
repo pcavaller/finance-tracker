@@ -108,10 +108,10 @@
             </div>
             <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
               <div class="h-2 bg-indigo-500 rounded-full progress-bar"
-                :style="'width: ' + Math.round((cat.amount / dashTotal) * 100) + '%'"></div>
+                :style="'width: ' + Math.min(100, Math.round((cat.amount / dashExpenseTotal) * 100)) + '%'"></div>
             </div>
             <div class="text-right text-xs text-gray-400 mt-0.5"
-              x-text="Math.round((cat.amount / dashTotal) * 100) + '%'"></div>
+              x-text="Math.round((cat.amount / dashExpenseTotal) * 100) + '%'"></div>
 
             <!-- Expanded transactions -->
             <div x-show="expandedCat === cat.name" x-transition class="mt-2 border-l-2 border-indigo-100 pl-3">
@@ -511,7 +511,7 @@
           <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
             <span class="text-sm text-gray-700" x-text="catEmoji(cat.name) + ' ' + cat.name"></span>
             <div class="flex items-center gap-3">
-              <span class="text-xs text-gray-400" x-text="Math.round(cat.amount / annualTotal * 100) + '%'"></span>
+              <span class="text-xs text-gray-400" x-text="Math.round(cat.amount / annualCategories.reduce((s,c)=>s+c.amount,0) * 100) + '%'"></span>
               <span class="text-sm font-semibold text-gray-800 w-20 text-right" x-text="fmtAmount(cat.amount)"></span>
             </div>
           </div>
@@ -637,6 +637,7 @@ function app() {
     dashYear: new Date().getFullYear(),
     dashMonth: new Date().getMonth() + 1,
     dashTotal: 0,
+    get dashExpenseTotal() { return this.dashCategories.reduce((s,c)=>s+c.amount,0) || 1; },
     dashCategories: [],
     dashIncome: 0,
     dashIncomeItems: [],
@@ -694,10 +695,6 @@ function app() {
         window.Telegram.WebApp.ready();
         window.Telegram.WebApp.expand();
       }
-      // Watch for trend data — render chart after Alpine updates DOM
-      this.$watch('trendMonths', () => {
-        requestAnimationFrame(() => requestAnimationFrame(() => this.renderTrendChart()));
-      });
       await this.loadPeople();
       await this.refreshDashboard();
     },
@@ -764,9 +761,7 @@ function app() {
           .filter(([name]) => !name.startsWith('__'))
           .map(([name, amount]) => ({ name, amount }))
           .sort((a, b) => b.amount - a.amount);
-        // Pre-load transactions for drill-down and trend chart
         this._loadDashTxs();
-        this.loadTrend();
       } catch (e) {
         this.showToast('Error cargando datos', true);
       } finally {
@@ -981,6 +976,7 @@ function app() {
             const data = await r.json();
             const total = data.total || 0;
             const cats = Object.entries(data.summary || {})
+              .filter(([name]) => !name.startsWith('__'))
               .map(([name, amount]) => ({ name, amount }))
               .sort((a, b) => b.amount - a.amount)
               .slice(0, 4);
