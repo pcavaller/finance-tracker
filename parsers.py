@@ -76,6 +76,8 @@ OWN_ACCOUNT_KEYWORDS = [
     'TRADE REPUBLIC',
     'PAYOUT TO TRANSIT',
     'PAYOUT TO TRANSIT ACCOUNT',
+    'ES3900812709530005501262',  # Sabadell personal account
+    'PABLO SABADELL',
 ]
 
 
@@ -279,8 +281,8 @@ class TradeRepublicParser:
 
         tipo = ' '.join(tipo_words).strip()
         desc = _clean_tr_desc(' '.join(desc_words))
-        entrada = _parse_amount(' '.join(entrada_words))
-        salida = _parse_amount(' '.join(salida_words))
+        entrada = _parse_amount(entrada_words[0]) if entrada_words else None
+        salida = _parse_amount(salida_words[0]) if salida_words else None
         # Only keep numeric tokens (ignore "EUR" currency labels)
         balance_numeric = [t for t in balance_words if re.search(r'\d', t)]
         current_balance = _parse_amount(' '.join(balance_numeric[:1]))
@@ -331,6 +333,13 @@ class TradeRepublicParser:
                 return Transaction(date=date, description=desc, amount=entrada,
                                    tx_type='expense', bank='Trade Republic'), current_balance
 
+        # Unrecognized tipo: if there's an outgoing amount, treat as expense rather than drop silently
+        if salida:
+            return Transaction(date=date, description=desc or tipo, amount=salida,
+                               tx_type='expense', bank='Trade Republic'), current_balance
+        if entrada:
+            return Transaction(date=date, description=desc or tipo, amount=entrada,
+                               tx_type='income', bank='Trade Republic'), current_balance
         return None, current_balance
 
 
