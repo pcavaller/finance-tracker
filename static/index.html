@@ -374,9 +374,37 @@
          VIEW: PERSONAS
     ══════════════════════════════════════════ -->
     <div x-show="view === 'personas'">
-      <div class="mt-6">
+      <div class="mt-6 flex items-center justify-between">
         <h2 class="text-xl font-bold text-gray-900">Personas</h2>
-        <p class="text-sm text-gray-500 mt-1">Gastos del mes actual por titular</p>
+        <!-- mode toggle -->
+        <div class="flex items-center bg-gray-100 rounded-xl p-0.5 text-xs font-medium">
+          <button @click="personasMode = 'month'; loadPersonas()"
+            :class="personasMode === 'month' ? 'bg-white shadow text-gray-800' : 'text-gray-500'"
+            class="px-3 py-1.5 rounded-[10px] transition-all">Mes</button>
+          <button @click="personasMode = 'annual'; loadPersonas()"
+            :class="personasMode === 'annual' ? 'bg-white shadow text-gray-800' : 'text-gray-500'"
+            class="px-3 py-1.5 rounded-[10px] transition-all">Año</button>
+        </div>
+      </div>
+
+      <!-- month selector -->
+      <div x-show="personasMode === 'month'" class="mt-3">
+        <select x-model="personasMonth" @change="loadPersonas()"
+          class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 w-full">
+          <template x-for="m in availableMonths" :key="m">
+            <option :value="m" x-text="fmtMonthLabel(m)"></option>
+          </template>
+        </select>
+      </div>
+
+      <!-- year selector -->
+      <div x-show="personasMode === 'annual'" class="mt-3 flex items-center justify-center gap-4">
+        <button @click="personasYear--; loadPersonas()" class="p-1.5 rounded-full hover:bg-gray-200 text-gray-500">‹</button>
+        <span class="font-semibold text-gray-800 w-12 text-center" x-text="personasYear"></span>
+        <button @click="personasYear++; loadPersonas()"
+          :disabled="personasYear >= new Date().getFullYear()"
+          :class="personasYear >= new Date().getFullYear() ? 'opacity-30 cursor-not-allowed' : 'hover:bg-gray-200'"
+          class="p-1.5 rounded-full text-gray-500">›</button>
       </div>
 
       <div x-show="personasLoading" class="mt-8 text-center py-8">
@@ -574,7 +602,7 @@
         </svg>
         <span class="text-[10px] font-medium">Historial</span>
       </button>
-      <button @click="view = 'personas'; loadPersonas()"
+      <button @click="view = 'personas'; if (!availableMonths.length) loadHistoryMonths().then(() => loadPersonas()); else loadPersonas()"
         class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'personas' ? 'text-indigo-600' : 'text-gray-400'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -666,6 +694,9 @@ function app() {
     // Personas
     personasSummary: [],
     personasLoading: false,
+    personasMode: 'month',   // 'month' | 'annual'
+    personasMonth: new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'),
+    personasYear: new Date().getFullYear(),
 
     // Search
     searchQuery: '',
@@ -966,22 +997,47 @@ function app() {
       this.personasLoading = true;
       this.personasSummary = [];
       try {
-        const now = new Date();
-        const y = now.getFullYear();
-        const m = now.getMonth() + 1;
-        const results = await Promise.all(
-          this.people.map(async name => {
-            const r = await fetch(`/api/summary?year=${y}&month=${m}&titular=${encodeURIComponent(name)}`);
-            const data = await r.json();
-            const total = data.total || 0;
-            const cats = Object.entries(data.summary || {})
-              .filter(([name]) => !name.startsWith('__'))
-              .map(([name, amount]) => ({ name, amount }))
-              .sort((a, b) => b.amount - a.amount)
-              .slice(0, 4);
-            return { name, total, topCats: cats };
-          })
-        );
+        let results;
+        if (this.personasMode === 'month') {
+          const [y, m] = this.personasMonth.split('-');
+          results = await Promise.all(
+            this.people.map(async name => {
+              const r = await fetch(`/api/summary?year=${y}&month=${m}&titular=${encodeURIComponent(name)}`);
+              const data = await r.json();
+              const total = data.total || 0;
+              const cats = Object.entries(data.summary || {})
+                .filter(([k]) => !k.startsWith('__'))
+                .map(([k, amount]) => ({ name: k, amount }))
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 4);
+              return { name, total, topCats: cats };
+            })
+          );
+        } else {
+          // annual: fetch all months of the year and aggregate
+          const yearMonths = (this.availableMonths || []).filter(m => m.startsWith(String(this.personasYear)));
+          results = await Promise.all(
+            this.people.map(async name => {
+              const catMap = {};
+              let total = 0;
+              await Promise.all(yearMonths.map(async ym => {
+                const [y, m] = ym.split('-');
+                const r = await fetch(`/api/summary?year=${y}&month=${m}&titular=${encodeURIComponent(name)}`);
+                const data = await r.json();
+                total += data.total || 0;
+                for (const [k, v] of Object.entries(data.summary || {})) {
+                  if (k.startsWith('__')) continue;
+                  catMap[k] = (catMap[k] || 0) + v;
+                }
+              }));
+              const topCats = Object.entries(catMap)
+                .map(([k, amount]) => ({ name: k, amount }))
+                .sort((a, b) => b.amount - a.amount)
+                .slice(0, 4);
+              return { name, total, topCats };
+            })
+          );
+        }
         this.personasSummary = results.filter(p => p.total > 0);
       } catch (e) {
         this.showToast('Error cargando personas', true);
