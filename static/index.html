@@ -108,10 +108,10 @@
             </div>
             <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
               <div class="h-2 bg-indigo-500 rounded-full progress-bar"
-                :style="'width: ' + Math.min(100, Math.round((cat.amount / dashExpenseTotal) * 100)) + '%'"></div>
+                :style="'width: ' + Math.min(100, Math.round((cat.amount / (dashCategories.reduce((s,c)=>s+c.amount,0)||1)) * 100)) + '%'"></div>
             </div>
             <div class="text-right text-xs text-gray-400 mt-0.5"
-              x-text="Math.round((cat.amount / dashExpenseTotal) * 100) + '%'"></div>
+              x-text="Math.round((cat.amount / (dashCategories.reduce((s,c)=>s+c.amount,0)||1)) * 100) + '%'"></div>
 
             <!-- Expanded transactions -->
             <div x-show="expandedCat === cat.name" x-transition class="mt-2 border-l-2 border-indigo-100 pl-3">
@@ -637,7 +637,6 @@ function app() {
     dashYear: new Date().getFullYear(),
     dashMonth: new Date().getMonth() + 1,
     dashTotal: 0,
-    get dashExpenseTotal() { return this.dashCategories.reduce((s,c)=>s+c.amount,0) || 1; },
     dashCategories: [],
     dashIncome: 0,
     dashIncomeItems: [],
@@ -761,7 +760,7 @@ function app() {
           .filter(([name]) => !name.startsWith('__'))
           .map(([name, amount]) => ({ name, amount }))
           .sort((a, b) => b.amount - a.amount);
-        this._loadDashTxs();
+        await this._loadDashTxs();
       } catch (e) {
         this.showToast('Error cargando datos', true);
       } finally {
