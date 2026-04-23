@@ -416,25 +416,52 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(matches) == 1:
                 titular = matches[0]
             elif len(matches) == 0:
-                titular = typed_name  # new person, use as-is
+                titular = typed_name
             else:
-                # Ambiguous — ask user to pick
                 set_session(context.user_data, [tx], 'Efectivo', 0, titular='')
                 buttons = [[InlineKeyboardButton(t, callback_data=f"titular:{t}")] for t in matches]
                 buttons.append([InlineKeyboardButton("🗑 Cancelar", callback_data="cancel_all")])
                 await msg.edit_text(
-                    f"👤 ¿A quién corresponde este gasto?",
+                    "👤 ¿A quién corresponde este gasto?",
                     reply_markup=InlineKeyboardMarkup(buttons),
                 )
                 return
+            set_session(context.user_data, [tx], 'Efectivo', 0, titular=titular)
+            await _show_cash_category(msg, tx)
         else:
-            titular = 'Pablo Cavaller'
-
-        set_session(context.user_data, [tx], 'Efectivo', 0, titular=titular)
-        await _show_cash_confirm(msg, tx, titular)
+            # Always ask for titular first when no prefix given
+            set_session(context.user_data, [tx], 'Efectivo', 0, titular='')
+            all_titulars = sheets.get_titulares() or ['Pablo Cavaller']
+            buttons = [[InlineKeyboardButton(t, callback_data=f"titular:{t}")] for t in all_titulars]
+            buttons.append([InlineKeyboardButton("🗑 Cancelar", callback_data="cancel_all")])
+            await msg.edit_text(
+                f"💵 <b>{h(description)}</b>  <b>{h(fmt_eur(amount))}</b>\n\n👤 ¿A quién corresponde?",
+                parse_mode='HTML',
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
 
     except Exception as e:
         await msg.edit_text(f"❌ Error: {h(str(e))}", parse_mode='HTML')
+
+
+async def _show_cash_category(msg, tx: Transaction):
+    emoji = CATEGORY_EMOJI.get(tx.category, '📦')
+    cats = CATEGORIES
+    rows = []
+    for i in range(0, len(cats), 2):
+        row = []
+        for cat in cats[i:i + 2]:
+            e = CATEGORY_EMOJI.get(cat, '📦')
+            marker = ' ✓' if cat == tx.category else ''
+            row.append(InlineKeyboardButton(f"{e} {cat}{marker}", callback_data=f"cashcat:{cat}"))
+        rows.append(row)
+    rows.append([InlineKeyboardButton("🗑 Cancelar", callback_data="cancel_all")])
+    await msg.edit_text(
+        f"💵 <b>{h(tx.description)}</b>  <b>{h(fmt_eur(tx.amount))}</b>\n\n"
+        f"📂 Clasificado como {emoji} <b>{h(tx.category)}</b> — ¿confirmas o cambias?",
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
 
 
 async def _show_cash_confirm(msg, tx: Transaction, titular: str):
@@ -462,7 +489,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     session = get_session(context.user_data)
 
-    # ── Titular selection (ambiguous cash expense) ─────────────────────────────
+    # ── Titular selection (cash expense) ──────────────────────────────────────
     if data.startswith('titular:'):
         titular = data[len('titular:'):]
         if not session:
@@ -470,6 +497,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         session['titular'] = titular
         tx = session['expenses'][0]
+        await _show_cash_category(query.message, tx)
+        return
+
+    # ── Category selection for cash expense ───────────────────────────────────
+    if data.startswith('cashcat:'):
+        new_cat = data[len('cashcat:'):]
+        if not session:
+            await query.edit_message_text("❌ Sesión expirada.")
+            return
+        session['expenses'][0].category = new_cat
+        tx = session['expenses'][0]
+        titular = session.get('titular', 'Pablo Cavaller')
         await _show_cash_confirm(query.message, tx, titular)
         return
 
