@@ -10,9 +10,10 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, HTTPException, File
+from fastapi import FastAPI, UploadFile, HTTPException, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
 from parsers import (
@@ -23,6 +24,17 @@ from classifier import classify_batch, load_custom_rules
 from sheets import SheetsClient
 
 app = FastAPI(title="Finance Tracker")
+
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith('/api/'):
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+        return response
+
+app.add_middleware(NoCacheMiddleware)
 
 sheets = SheetsClient()
 load_custom_rules(sheets)
