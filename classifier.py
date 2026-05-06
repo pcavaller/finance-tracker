@@ -127,6 +127,14 @@ RULES: list[tuple[str, list[str]]] = [
 ]
 
 
+# Descriptions that map directly to a tx_type override (not a category)
+# These are checked before category classification in classify_batch.
+TYPE_OVERRIDE_RULES: list[tuple[str, str]] = [
+    # Datafono/nómina transfers from Jose María Samaranch Gallart → internal
+    ('JOSE MARIA SAMARANCH GALLART', 'internal'),
+    ('JOSÉ MARÍA SAMARANCH GALLART', 'internal'),
+]
+
 _custom_rules: list[tuple[str, str]] = []
 _learned: dict[str, str] = {}
 
@@ -156,6 +164,16 @@ def _classify_description(description: str) -> str:
 
 def classify_batch(transactions: list[Transaction]) -> list[str]:
     return [_classify_description(tx.description) for tx in transactions]
+
+
+def apply_type_overrides(transactions: list[Transaction]) -> None:
+    """Mutate tx_type to 'internal' for transactions matching TYPE_OVERRIDE_RULES."""
+    for tx in transactions:
+        desc_upper = tx.description.upper()
+        for keyword, tx_type in TYPE_OVERRIDE_RULES:
+            if keyword.upper() in desc_upper:
+                tx.tx_type = tx_type
+                break
 
 
 def classify_cash_text(text: str) -> tuple[float, str, str]:

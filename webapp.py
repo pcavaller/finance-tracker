@@ -20,7 +20,7 @@ from parsers import (
     detect_bank, TradeRepublicParser, OpenbankParser,
     OpenbankPDFParser, RevolutPDFParser, Transaction,
 )
-from classifier import classify_batch, load_custom_rules
+from classifier import classify_batch, load_custom_rules, apply_type_overrides
 from sheets import SheetsClient
 
 app = FastAPI(title="Finance Tracker")
@@ -93,6 +93,7 @@ async def upload_file(file: UploadFile = File(...)):
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'
 
+        apply_type_overrides(all_txs)
         expenses = [tx for tx in all_txs if tx.tx_type in ('expense', 'income')]
         excluded = len(all_txs) - len(expenses)
 
@@ -157,6 +158,8 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
     for r in sheets._get_all_records():
         if r.get('Mes') != month_str or r.get('Tipo') != 'income':
             continue
+        if r.get('Banco', '') == 'Santander':
+            continue
         desc = r.get('Descripción', '')
         desc_up = desc.upper()
         if 'NOMINA' in desc_up or 'NÓMINA' in desc_up:
@@ -210,7 +213,7 @@ async def get_annual(year: int = None, titular: str = None):
             cat = r.get('Categoría') or 'Otros'
             cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
             month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
-        elif tipo == 'income':
+        elif tipo == 'income' and r.get('Banco', '') != 'Santander':
             desc = r.get('Descripción', '').upper()
             if 'NOMINA' not in desc and 'NÓMINA' not in desc:
                 month_income[mes] = month_income.get(mes, 0.0) + amt

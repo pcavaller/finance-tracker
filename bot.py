@@ -24,7 +24,7 @@ from parsers import (
     TradeRepublicParser, OpenbankParser, OpenbankPDFParser, OpenbankCuentasPDFParser,
     RevolutPDFParser, SantanderPDFParser,
 )
-from classifier import classify_batch, classify_cash_text, load_custom_rules
+from classifier import classify_batch, classify_cash_text, load_custom_rules, apply_type_overrides
 from sheets import SheetsClient
 
 import re as _re
@@ -298,6 +298,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'
 
+        apply_type_overrides(all_txs)
         # Include expenses + only meaningful income (refunds and incoming bizums)
         expenses = [tx for tx in all_txs
                     if tx.tx_type == 'expense'

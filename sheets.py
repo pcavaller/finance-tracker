@@ -130,7 +130,7 @@ class SheetsClient:
             if tipo == 'expense':
                 summary[cat] = summary.get(cat, 0.0) + amount
                 total_expenses += amount
-            elif tipo == 'income':
+            elif tipo == 'income' and row.get('Banco', '') != 'Santander':
                 desc = row.get('Descripción', '').upper()
                 # Exclude salary (nómina + bonus)
                 if 'NÓMINA' not in desc and 'NOMINA' not in desc:
@@ -221,6 +221,31 @@ class SheetsClient:
                 continue
             if row[banco_col] == 'Santander' and row[tipo_col] == 'expense':
                 self.ws.update_cell(i, tipo_col_1, 'internal')
+                updated += 1
+        if updated:
+            self._invalidate_cache()
+        return updated
+
+    def update_transaction_tipo(self, descripcion_contains: str, banco: str, new_tipo: str) -> int:
+        """Update Tipo for all rows matching banco and description substring. Returns count updated."""
+        values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')
+        if not values:
+            return 0
+        headers = values[0]
+        try:
+            desc_col = headers.index('Descripción')
+            banco_col = headers.index('Banco')
+            tipo_col = headers.index('Tipo')
+        except ValueError:
+            return 0
+        tipo_col_1 = tipo_col + 1
+        needle = descripcion_contains.upper()
+        updated = 0
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) <= max(desc_col, banco_col, tipo_col):
+                continue
+            if row[banco_col] == banco and needle in row[desc_col].upper():
+                self.ws.update_cell(i, tipo_col_1, new_tipo)
                 updated += 1
         if updated:
             self._invalidate_cache()
