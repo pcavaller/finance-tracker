@@ -133,6 +133,9 @@ TYPE_OVERRIDE_RULES: list[tuple[str, str]] = [
     # Datafono/nómina transfers from Jose María Samaranch Gallart → internal
     ('JOSE MARIA SAMARANCH GALLART', 'internal'),
     ('JOSÉ MARÍA SAMARANCH GALLART', 'internal'),
+    # Trade Republic auto-generated income → internal (not real income)
+    ('CASH REWARD ALLOCATION', 'internal'),
+    ('INTEREST PAYMENT', 'internal'),
 ]
 
 _custom_rules: list[tuple[str, str]] = []
