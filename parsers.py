@@ -78,6 +78,8 @@ OWN_ACCOUNT_KEYWORDS = [
     'PAYOUT TO TRANSIT ACCOUNT',
     'ES3900812709530005501262',  # Sabadell personal account
     'PABLO SABADELL',
+    'MAR A ROSALIA',             # María's Revolut/own account alias
+    'RUISANCHEZ',                # transfers between Pablo ↔ María
 ]
 
 
@@ -150,7 +152,7 @@ def _clean_openbank_desc(concepto: str) -> str:
     return concepto
 
 
-def detect_bank(filename: str) -> str:
+def detect_bank(filename: str, content_hint: str = '') -> str:
     import os
     name = os.path.basename(filename).lower()
     if 'extracto' in name or 'trade' in name or 'republic' in name:
@@ -159,7 +161,31 @@ def detect_bank(filename: str) -> str:
         return 'openbank_pdf' if name.endswith('.pdf') else 'openbank'
     if 'revolut' in name or 'account-statement' in name:
         return 'revolut'
+    # Content-based detection for files with non-descriptive names
+    if content_hint:
+        ch = content_hint.upper()
+        if '0049' in ch or 'SANTANDER' in ch:
+            return 'santander'
+        if 'TRADE REPUBLIC' in ch or 'TRBKESM' in ch:
+            return 'trade_republic'
+        if 'CUENTAS - MOVIMIENTOS' in ch or 'CTA NOMINA OPEN' in ch:
+            return 'openbank_cuentas'
+        if 'OPENBANK' in ch:
+            return 'openbank_pdf'
     return 'unknown'
+
+
+def _detect_bank_from_pdf(pdf_path: str) -> str:
+    """Read first page of PDF and detect bank from content."""
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            # Use crop to strip sidebar before text extraction
+            page = pdf.pages[0]
+            cropped = page.crop((50, 0, page.width, page.height))
+            text = cropped.extract_text() or ''
+        return detect_bank(pdf_path, content_hint=text)
+    except Exception:
+        return 'unknown'
 
 
 # ── Trade Republic PDF Parser ──────────────────────────────────────────────────
@@ -634,3 +660,409 @@ class RevolutPDFParser:
                                tx_type='income', bank='Revolut')
 
         return None
+
+
+# ── Openbank Cuentas PDF Parser ────────────────────────────────────────────────
+
+class OpenbankCuentasPDFParser:
+    """
+    Parse Openbank 'Cuentas - Movimientos' PDFs (exported from web portal).
+
+    The PDF has a rotated sidebar at x < 50 that pollutes extract_text().
+    Solution: crop each page to x >= 50 before text extraction.
+
+    Text layout per transaction:
+      Pre-desc lines (0–2) → Data line: "YYYY-MM-DD YYYY-MM-DD [inline_desc] amount saldo"
+      Post-desc line (0–1) — artifacts like "TARJETA : ...6601 EL YYYY-MM-DD"
+    """
+
+    _DATA_LINE_RE = re.compile(
+        r'^(\d{4}-\d{2}-\d{2})\s+\d{4}-\d{2}-\d{2}\s*(.*?)\s*(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*$'
+    )
+    _NOISE_RE = re.compile(
+        r'^(Cuentas\s*-|Fecha\s+descarga|Número\s+de\s+Cuenta|Descripci[oó]n:|Titular:|Saldo:|Lista\s+de\s+Movimientos|Fecha$|Operaci[oó]n\s+Fecha|P[aá]gina:)',
+        re.IGNORECASE,
+    )
+    # Post-desc artifact patterns to skip (card detail lines)
+    _POSTDESC_SKIP_RE = re.compile(r'^(TARJETA\s*:|:\s*\.\.\.\d|EL\s+\d{4}-)', re.IGNORECASE)
+
+    def parse(self, pdf_path: str) -> list[Transaction]:
+        raw_lines: list[str] = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                cropped = page.crop((50, 0, page.width, page.height))
+                text = cropped.extract_text() or ''
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if self._NOISE_RE.match(line):
+                        continue
+                    raw_lines.append(line)
+
+        transactions: list[Transaction] = []
+        pending_pre: list[str] = []
+
+        i = 0
+        while i < len(raw_lines):
+            line = raw_lines[i]
+            m = self._DATA_LINE_RE.match(line)
+            if m:
+                date_str, inline_desc, amount_str, _ = m.groups()
+                try:
+                    date = datetime.strptime(date_str, '%Y-%m-%d')
+                    amount = float(amount_str)
+                except ValueError:
+                    pending_pre = []
+                    i += 1
+                    continue
+
+                # Collect post-desc: next line if it's not a data line and not noise
+                post_parts: list[str] = []
+                if i + 1 < len(raw_lines):
+                    next_line = raw_lines[i + 1]
+                    if not self._DATA_LINE_RE.match(next_line) and not self._NOISE_RE.match(next_line):
+                        if not self._POSTDESC_SKIP_RE.match(next_line):
+                            post_parts.append(next_line)
+                        i += 1  # consume it regardless (avoid it becoming pre-desc of next tx)
+
+                parts = [p for p in pending_pre + ([inline_desc.strip()] if inline_desc.strip() else []) + post_parts if p.strip()]
+                description = ' '.join(parts).strip() or 'Sin descripción'
+                # Remove card artifact tails
+                description = re.sub(r'\s+CON LA TARJETA\s*:?\s*$', '', description, flags=re.I).strip()
+                description = re.sub(r',\s*CON LA TARJETA\s*$', '', description, flags=re.I).strip()
+                # Remove trailing card/date artifacts: "... : ...6601 EL YYYY-MM-DD"
+                description = re.sub(r'\s*:\s*\.\.\.\d{4}\s+EL\s+\d{4}-\d{2}-\d{2}$', '', description).strip()
+                description = re.sub(r'\s*\.\.\.\d{4}\s+EL\s+\d{4}-\d{2}-\d{2}$', '', description).strip()
+
+                tx = self._classify(date, description, amount)
+                if tx:
+                    transactions.append(tx)
+                pending_pre = []
+            else:
+                if not self._NOISE_RE.match(line):
+                    pending_pre.append(line)
+            i += 1
+
+        return transactions
+
+    def _classify(self, date: datetime, description: str, amount: float) -> Optional[Transaction]:
+        cu = description.upper()
+
+        if 'CAJERO' in cu or 'DISPOSICION' in cu:
+            return Transaction(date=date, description=f'Cajero {abs(amount):.0f}€',
+                               amount=abs(amount), tx_type='cash_withdrawal', bank='Openbank')
+
+        if _is_internal(description) or 'TRADE REPÚBLIC' in cu or 'TRADE REPÚBLICA' in cu or 'TRADE REPUBLIC' in cu:
+            return Transaction(date=date, description=description, amount=abs(amount),
+                               tx_type='internal', bank='Openbank')
+
+        if amount < 0:
+            desc = _clean_openbank_desc(description)
+            return Transaction(date=date, description=desc, amount=abs(amount),
+                               tx_type='expense', bank='Openbank')
+
+        if amount > 0:
+            if 'BIZUM DE' in cu:
+                desc = re.sub(r'^BIZUM DE\s*', '', description, flags=re.I)
+                desc = re.sub(r'\s+CONCEPTO.*', '', desc, flags=re.I).strip()
+                return Transaction(date=date, description=f'Bizum de {desc}',
+                                   amount=amount, tx_type='income', bank='Openbank')
+            return Transaction(date=date, description=description, amount=amount,
+                               tx_type='income', bank='Openbank')
+
+        return None
+
+
+# ── Trade Republic PDF Parser v2 (new statement format) ───────────────────────
+
+class TradeRepublicPDFParserV2:
+    """
+    Parse Trade Republic account statement PDFs in the newer format (post-2025).
+
+    Text-based approach using extract_text() since the layout is clean.
+    Transactions appear between "TRANSACCIONES DE CUENTA" and "RESUMEN DEL BALANCE".
+
+    Each transaction block (2-4 lines):
+      Line A: "DD mmm" (date part 1, sometimes with inline description)
+      Line B: "YYYY"  (year, sometimes with TIPO and description)
+      → TIPO and DESCRIPCIÓN can appear on either line, the year always on a standalone line
+      → IMPORTE: "X.XXX,XX €" (second-to-last amount) | BALANCE: "X.XXX,XX €" (last)
+
+    The amount regex finds all "X.XXX,XX €" tokens; last = balance, second-to-last = importe.
+    """
+
+    _DATE_PART_RE = re.compile(r'^(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\s*(.*)$', re.IGNORECASE)
+    _YEAR_RE = re.compile(r'^(\d{4})\s*(.*)$')
+    _AMOUNT_RE = re.compile(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*€')
+    _TIPO_RE = re.compile(r'^(Interés|Operar|Transferencia|Transacción)', re.IGNORECASE)
+
+    _SECTION_START = re.compile(r'TRANSACCIONES\s+DE\s+CUENTA', re.IGNORECASE)
+    _SECTION_END = re.compile(r'RESUMEN\s+DEL\s+BALANCE', re.IGNORECASE)
+    _NOISE_RE = re.compile(
+        r'^(TRADE REPUBLIC|FECHA|TIPO|DESCRIPCI|PRODUCTO|BALANCE|RESUMEN\s+DE\s+ESTADO|CUENTAS\s+COL|Deutsche|Creado|Página|NOTAS)',
+        re.IGNORECASE,
+    )
+
+    def parse(self, pdf_path: str) -> list[Transaction]:
+        raw_lines: list[str] = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ''
+                raw_lines.extend(text.splitlines())
+
+        # Extract only the transaction section
+        in_section = False
+        section_lines: list[str] = []
+        for line in raw_lines:
+            line = line.strip()
+            if not line:
+                continue
+            if self._SECTION_START.search(line):
+                in_section = True
+                continue
+            if in_section and self._SECTION_END.search(line):
+                break
+            if in_section:
+                if not self._NOISE_RE.match(line):
+                    section_lines.append(line)
+
+        # Group into blocks: a block starts when we see a date line "DD mmm ..."
+        blocks: list[list[str]] = []
+        current: list[str] = []
+        for line in section_lines:
+            if self._DATE_PART_RE.match(line):
+                if current:
+                    blocks.append(current)
+                current = [line]
+            elif current:
+                current.append(line)
+        if current:
+            blocks.append(current)
+
+        transactions: list[Transaction] = []
+        for block in blocks:
+            tx = self._parse_block(block)
+            if tx:
+                transactions.append(tx)
+        return transactions
+
+    def _parse_block(self, block: list[str]) -> Optional[Transaction]:
+        full_text = ' '.join(block)
+
+        # Extract date: day + month from line 0, year from the "YYYY" standalone
+        m_date = self._DATE_PART_RE.match(block[0])
+        if not m_date:
+            return None
+        day, mon, rest0 = m_date.groups()
+        month = MONTH_ES.get(mon.lower()[:3])
+        if not month:
+            return None
+
+        year = None
+        other_parts: list[str] = [rest0.strip()] if rest0.strip() else []
+        for line in block[1:]:
+            m_year = self._YEAR_RE.match(line)
+            if m_year and year is None:
+                y_str, rest = m_year.groups()
+                if 2020 <= int(y_str) <= 2030:
+                    year = int(y_str)
+                    if rest.strip():
+                        other_parts.append(rest.strip())
+                    continue
+            other_parts.append(line.strip())
+
+        if not year:
+            return None
+        try:
+            date = datetime(year, month, int(day))
+        except ValueError:
+            return None
+
+        # Extract all amounts from full_text
+        amounts = self._AMOUNT_RE.findall(full_text)
+        if not amounts:
+            return None
+        # Last = balance, second-to-last = importe (or only one = importe)
+        importe_str = amounts[-2] if len(amounts) >= 2 else amounts[-1]
+        raw = importe_str.replace('.', '').replace(',', '.')
+        try:
+            amount = float(raw)
+        except ValueError:
+            return None
+
+        # Determine TIPO: search each part individually since TIPO may not be first
+        tipo = ''
+        for part in other_parts:
+            m_tipo = self._TIPO_RE.match(part.strip())
+            if m_tipo:
+                tipo = m_tipo.group(1)
+                break
+
+        # Build description: join other_parts, strip amounts and tipo keyword
+        combined = ' '.join(other_parts)
+        desc = self._AMOUNT_RE.sub('', combined).strip()
+        desc = re.sub(r'(Interés|Operar|Transferencia|Transacción)\s*(con\s+tarjeta)?\s*', '', desc, flags=re.I).strip()
+        desc = _clean_tr_desc(desc)
+
+        tipo_lower = tipo.lower()
+
+        if 'interés' in tipo_lower or 'bonificación' in tipo_lower:
+            return Transaction(date=date, description=desc or 'Interest payment',
+                               amount=amount, tx_type='income', bank='Trade Republic')
+
+        if 'operar' in tipo_lower:
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='investment', bank='Trade Republic')
+
+        if 'transferencia' in tipo_lower:
+            if _is_internal(desc):
+                return Transaction(date=date, description=desc, amount=amount,
+                                   tx_type='internal', bank='Trade Republic')
+            # Determine direction: "Incoming" or "Outgoing" in description
+            desc_upper = desc.upper()
+            if 'OUTGOING' in desc_upper or 'SALIDA' in desc_upper:
+                return Transaction(date=date, description=desc, amount=amount,
+                                   tx_type='expense', bank='Trade Republic')
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='income', bank='Trade Republic')
+
+        if 'transacción' in tipo_lower or 'tarjeta' in tipo_lower:
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='expense', bank='Trade Republic')
+
+        # Fallback
+        if desc:
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='expense', bank='Trade Republic')
+        return None
+
+
+# ── Santander PDF Parser ───────────────────────────────────────────────────────
+
+class SantanderPDFParser:
+    """
+    Parse Santander account statement PDFs.
+
+    Layout (text-based extraction):
+      - Transaction line: "DD mmm YYYY  <description>  X.XXX,XX€  X.XXX,XX€"
+      - Value date line:  "F. valor: DD mmm YYYY  [description continuation]"
+      - Description may wrap onto the value-date line and subsequent lines.
+
+    Detection: IBAN contains "0049" (Santander BIC prefix).
+    """
+
+    # Regex for a transaction date line: starts with "DD mmm YYYY" followed by text
+    _TX_DATE_RE = re.compile(
+        r'^(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\s+(\d{4})\s+(.+)',
+        re.IGNORECASE,
+    )
+    # Regex to find amounts at end of line: one or two "X.XXX,XX€" tokens
+    _AMOUNTS_RE = re.compile(r'(-?\d{1,3}(?:\.\d{3})*,\d{2})€')
+    # Value date line
+    _FVALOR_RE = re.compile(r'^F\.\s*valor:', re.IGNORECASE)
+    # Header / noise lines to skip
+    _NOISE_RE = re.compile(
+        r'^(Titular|Cuenta|Saldo\s+disponible|Fecha\s+operaci|Movimientos\s+de\s+tu\s+cuenta|Documento\s+a\s+fecha)',
+        re.IGNORECASE,
+    )
+
+    def parse(self, pdf_path: str) -> list[Transaction]:
+        raw_lines: list[str] = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text() or ''
+                raw_lines.extend(text.splitlines())
+
+        # Build logical transaction blocks: each block = [tx_line, fvalor_line?, ...continuation]
+        blocks: list[list[str]] = []
+        current: list[str] = []
+
+        for line in raw_lines:
+            line = line.strip()
+            if not line:
+                continue
+            if self._NOISE_RE.match(line):
+                continue
+            if self._TX_DATE_RE.match(line):
+                if current:
+                    blocks.append(current)
+                current = [line]
+            elif current:
+                current.append(line)
+
+        if current:
+            blocks.append(current)
+
+        transactions = []
+        for block in blocks:
+            tx = self._parse_block(block)
+            if tx:
+                transactions.append(tx)
+        return transactions
+
+    def _parse_block(self, block: list[str]) -> Optional[Transaction]:
+        first = block[0]
+        m = self._TX_DATE_RE.match(first)
+        if not m:
+            return None
+
+        day, mon, year, rest = m.groups()
+        month = MONTH_ES.get(mon.lower()[:3])  # "sept" → "sep"
+        if not month:
+            return None
+        try:
+            date = datetime(int(year), month, int(day))
+        except ValueError:
+            return None
+
+        # Extract all amount tokens from the first line
+        amounts = self._AMOUNTS_RE.findall(rest)
+        if not amounts:
+            return None
+
+        # Last two amounts are importe and saldo; strip them to get description
+        # Remove from right: importe (and saldo if present)
+        desc_part = rest
+        for amt_str in reversed(amounts[-2:]):
+            # Remove the amount + € suffix from the right of desc_part
+            desc_part = desc_part[:desc_part.rfind(amt_str + '€')].rstrip()
+
+        # Collect continuation text from remaining lines (skip F.valor line itself but keep its tail)
+        for line in block[1:]:
+            if self._FVALOR_RE.match(line):
+                # Remove "F. valor: DD mmm YYYY" prefix, keep the rest as continuation
+                tail = re.sub(r'^F\.\s*valor:\s*\d{1,2}\s+\w+\s+\d{4}\s*', '', line, flags=re.IGNORECASE).strip()
+                if tail:
+                    desc_part = (desc_part + ' ' + tail).strip()
+            else:
+                # Pure continuation line
+                desc_part = (desc_part + ' ' + line).strip()
+
+        description = ' '.join(desc_part.split())
+
+        # Parse importe (second-to-last or only amount)
+        importe_str = amounts[-2] if len(amounts) >= 2 else amounts[-1]
+        raw = importe_str.replace('.', '').replace(',', '.')
+        try:
+            amount_val = float(raw)
+        except ValueError:
+            return None
+
+        amount = abs(amount_val)
+
+        # Determine tx_type
+        # Santander account belongs to María Ruisánchez: outgoing movements are internal
+        # transfers (between own accounts or personal payments), never tracked as expenses.
+        if amount_val > 0:
+            tx_type = 'income'
+        else:
+            tx_type = 'internal'
+
+        return Transaction(
+            date=date,
+            description=description,
+            amount=amount,
+            tx_type=tx_type,
+            bank='Santander',
+        )

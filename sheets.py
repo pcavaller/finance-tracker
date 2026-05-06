@@ -203,6 +203,29 @@ class SheetsClient:
         if keyword.upper() not in existing:
             self.ws_reglas.append_row([keyword.upper(), category])
 
+    def fix_santander_expense_types(self) -> int:
+        """Set Tipo=internal for all Santander rows currently marked as expense. Returns rows updated."""
+        values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')
+        if not values:
+            return 0
+        headers = values[0]
+        try:
+            banco_col = headers.index('Banco')
+            tipo_col = headers.index('Tipo')
+        except ValueError:
+            return 0
+        tipo_col_1 = tipo_col + 1  # gspread update_cell is 1-indexed
+        updated = 0
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) <= max(banco_col, tipo_col):
+                continue
+            if row[banco_col] == 'Santander' and row[tipo_col] == 'expense':
+                self.ws.update_cell(i, tipo_col_1, 'internal')
+                updated += 1
+        if updated:
+            self._invalidate_cache()
+        return updated
+
     def update_transaction_category(self, fecha: str, descripcion: str, amount: float, banco: str, new_category: str) -> bool:
         """Find a transaction by (fecha, descripcion, abs(amount), banco) and update its category."""
         values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')

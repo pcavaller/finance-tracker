@@ -20,7 +20,9 @@ load_dotenv()
 
 from parsers import (
     Transaction, CATEGORIES, CATEGORY_EMOJI,
-    detect_bank, TradeRepublicParser, OpenbankParser, OpenbankPDFParser, RevolutPDFParser,
+    detect_bank, _detect_bank_from_pdf,
+    TradeRepublicParser, OpenbankParser, OpenbankPDFParser, OpenbankCuentasPDFParser,
+    RevolutPDFParser, SantanderPDFParser,
 )
 from classifier import classify_batch, classify_cash_text, load_custom_rules
 from sheets import SheetsClient
@@ -250,7 +252,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bank_key = detect_bank(filename)
     if bank_key == 'unknown':
         if 'pdf' in mime:
-            bank_key = 'trade_republic'
+            # Try content-based detection before defaulting
+            bank_key = 'trade_republic'  # resolved after download
         elif 'excel' in mime or 'xls' in mime or 'html' in mime:
             bank_key = 'openbank'
         else:
@@ -270,6 +273,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tmp_path = tmp.name
 
     try:
+        # Re-detect from content for PDFs with uninformative names
+        if bank_key == 'trade_republic' and 'pdf' in (mime + filename.lower()):
+            detected = _detect_bank_from_pdf(tmp_path)
+            if detected != 'unknown':
+                bank_key = detected
+
         if bank_key == 'trade_republic':
             all_txs = TradeRepublicParser().parse(tmp_path)
             bank_name = 'Trade Republic'
@@ -279,6 +288,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif bank_key == 'revolut':
             all_txs = RevolutPDFParser().parse(tmp_path)
             bank_name = 'Revolut'
+        elif bank_key == 'santander':
+            all_txs = SantanderPDFParser().parse(tmp_path)
+            bank_name = 'Santander'
+        elif bank_key == 'openbank_cuentas':
+            all_txs = OpenbankCuentasPDFParser().parse(tmp_path)
+            bank_name = 'Openbank'
         else:
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'
