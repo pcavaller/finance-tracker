@@ -140,6 +140,8 @@ TYPE_OVERRIDE_RULES: list[tuple[str, str]] = [
     ('BARROS MARIA ROSALIA CONCEPTO', 'internal'),
     ('RUISANCHEZ GONZALEZ-BARROS MARIA ROSALIA', 'internal'),
     ('RUISANCHEZ GONZALEZ BARROS MARIA ROSALIA', 'internal'),
+    # TR outgoing transfers to own accounts → internal
+    ('OUTGOING TRANSFER FOR MARIA ROSALIA RUIS', 'internal'),
     # Reimbursements excluded from income
     ('MIRIAM B M', 'internal'),
     ('BLANCA D P', 'internal'),
