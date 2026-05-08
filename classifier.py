@@ -140,6 +140,10 @@ TYPE_OVERRIDE_RULES: list[tuple[str, str]] = [
     ('BARROS MARIA ROSALIA CONCEPTO', 'internal'),
     ('RUISANCHEZ GONZALEZ-BARROS MARIA ROSALIA', 'internal'),
     ('RUISANCHEZ GONZALEZ BARROS MARIA ROSALIA', 'internal'),
+    # Reimbursements excluded from income
+    ('MIRIAM B M', 'internal'),
+    ('BLANCA D P', 'internal'),
+    ('ANA D R', 'internal'),
 ]
 
 _custom_rules: list[tuple[str, str]] = []
