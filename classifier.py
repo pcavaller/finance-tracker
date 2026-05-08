@@ -136,6 +136,10 @@ TYPE_OVERRIDE_RULES: list[tuple[str, str]] = [
     # Trade Republic auto-generated income → internal (not real income)
     ('CASH REWARD ALLOCATION', 'internal'),
     ('INTEREST PAYMENT', 'internal'),
+    # María self-transfers between own accounts
+    ('BARROS MARIA ROSALIA CONCEPTO', 'internal'),
+    ('RUISANCHEZ GONZALEZ-BARROS MARIA ROSALIA', 'internal'),
+    ('RUISANCHEZ GONZALEZ BARROS MARIA ROSALIA', 'internal'),
 ]
 
 _custom_rules: list[tuple[str, str]] = []
