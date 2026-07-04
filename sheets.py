@@ -20,6 +20,11 @@ SCOPES = [
 HEADERS = ['Fecha', 'Descripción', 'Importe', 'Categoría', 'Banco', 'Titular', 'Mes', 'Tipo']
 
 
+def is_nomina(descripcion: str) -> bool:
+    d = descripcion.upper()
+    return 'NOMINA' in d or 'NÓMINA' in d
+
+
 class SheetsClient:
 
     def __init__(self, credentials_path: str = None, sheet_id: str = None):
@@ -34,7 +39,12 @@ class SheetsClient:
         self._spreadsheet = self.gc.open_by_key(self.sheet_id)
         self.ws = self._get_or_create_sheet('Transacciones', HEADERS)
         self.ws_personas = self._get_or_create_sheet('Personas', ['Titular', 'Creado'])
-        self.ws_reglas = self._get_or_create_sheet('Reglas', ['Keyword', 'Categoría'])
+        self.ws_reglas = self._get_or_create_sheet('Reglas', ['Keyword', 'Categoría', 'Tipo'])
+        self._ensure_header(self.ws_reglas, 'Tipo')
+        self._cache_data: list[dict] = []
+        self._cache_ts: float = 0.0
+
+    _CACHE_TTL: float = 60.0
 
     def _get_or_create_sheet(self, name: str, headers: list[str]):
         try:
@@ -48,9 +58,13 @@ class SheetsClient:
             })
         return ws
 
-    _cache_data: list[dict] = []
-    _cache_ts: float = 0.0
-    _CACHE_TTL: float = 60.0
+    @staticmethod
+    def _ensure_header(ws, header_name: str) -> None:
+        """Añade una columna de cabecera a una hoja ya existente si no la tiene
+        (migración in-place para hojas creadas antes de introducir esa columna)."""
+        headers = ws.row_values(1)
+        if header_name not in headers:
+            ws.update_cell(1, len(headers) + 1, header_name)
 
     def _get_all_records(self) -> list[dict]:
         """Fetch all records with unformatted numeric values. Cached for 60s."""
@@ -84,10 +98,11 @@ class SheetsClient:
             for r in rows
         }
 
-    def write_transactions(self, transactions: list[Transaction], titular: str = '') -> int:
-        """Write transactions, skipping duplicates. Returns number of rows actually written."""
+    def write_transactions(self, transactions: list[Transaction], titular: str = '') -> list[Transaction]:
+        """Write transactions, skipping duplicates. Returns the transactions actually written."""
         existing = self._existing_keys()
         rows = []
+        saved: list[Transaction] = []
         for tx in transactions:
             importe = -tx.amount if tx.tx_type == 'expense' else tx.amount
             key = (tx.fmt_date(), tx.description, self._amount_key(importe), tx.bank)
@@ -103,11 +118,12 @@ class SheetsClient:
                 tx.date.strftime('%Y-%m'),
                 tx.tx_type,
             ])
-            existing.add(key)  # avoid dupes within the same batch
+            existing.add(key)
+            saved.append(tx)
         if rows:
             self.ws.append_rows(rows)
             self._invalidate_cache()
-        return len(rows)
+        return saved
 
     def get_monthly_summary(self, year: int, month: int, titular: str = None) -> dict:
         month_str = f"{year:04d}-{month:02d}"
@@ -131,9 +147,7 @@ class SheetsClient:
                 summary[cat] = summary.get(cat, 0.0) + amount
                 total_expenses += amount
             elif tipo == 'income' and row.get('Banco', '') != 'Santander':
-                desc = row.get('Descripción', '').upper()
-                # Exclude salary (nómina + bonus)
-                if 'NÓMINA' not in desc and 'NOMINA' not in desc:
+                if not is_nomina(row.get('Descripción', '')):
                     summary['__income__'] = summary.get('__income__', 0.0) + amount
                     total_income += amount
         summary['__total__'] = total_expenses - total_income
@@ -193,15 +207,25 @@ class SheetsClient:
                 learned[desc] = cat
         return learned
 
-    def get_custom_rules(self) -> list[tuple[str, str]]:
-        """Returns list of (keyword_upper, category) from the Reglas sheet."""
+    def get_rules(self) -> list[dict]:
+        """Returns every row of the Reglas sheet as {'keyword', 'categoria', 'tipo'}.
+        Tipo vacío = regla de categoría (usa 'categoria'); Tipo='exclude' = excluir
+        la transacción del tracking; cualquier otro Tipo = forzar ese tx_type."""
         rows = self.ws_reglas.get_all_records()
-        return [(r['Keyword'].upper(), r['Categoría']) for r in rows if r.get('Keyword') and r.get('Categoría')]
+        return [
+            {
+                'keyword': r['Keyword'].upper(),
+                'categoria': r.get('Categoría', '').strip(),
+                'tipo': r.get('Tipo', '').strip().lower(),
+            }
+            for r in rows if r.get('Keyword')
+        ]
 
     def add_custom_rule(self, keyword: str, category: str):
-        existing = [kw for kw, _ in self.get_custom_rules()]
+        """Añade una regla de categoría (Tipo vacío) desde el comando de texto del bot."""
+        existing = {r['keyword'] for r in self.get_rules()}
         if keyword.upper() not in existing:
-            self.ws_reglas.append_row([keyword.upper(), category])
+            self.ws_reglas.append_row([keyword.upper(), category, ''])
 
     def fix_santander_expense_types(self) -> int:
         """Set Tipo=internal for all Santander rows currently marked as expense. Returns rows updated."""

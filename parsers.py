@@ -33,6 +33,7 @@ CATEGORIES = [
     'Regalos',
     'Viajes',
     'Impuestos',
+    'Boda',
     'Otros',
 ]
 
@@ -79,7 +80,7 @@ OWN_ACCOUNT_KEYWORDS = [
     'ES3900812709530005501262',  # Sabadell personal account
     'PABLO SABADELL',
     'MAR A ROSALIA',             # María's Revolut/own account alias
-    'RUISANCHEZ',                # transfers between Pablo ↔ María
+    'RUISANCHEZ GONZALEZ',       # María's specific surname combo (internal transfers)
 ]
 
 
@@ -150,6 +151,70 @@ def _clean_openbank_desc(concepto: str) -> str:
     if m:
         return f"Bizum → {m.group(1).strip()}"
     return concepto
+
+
+def _classify_openbank(date: datetime, concepto: str, amount: float) -> Optional[Transaction]:
+    """Reglas de clasificación compartidas por las tres variantes de parser de
+    Openbank (HTML/XLS, PDF 'Extracto', PDF 'Cuentas - Movimientos'). Cada
+    variante solo se encarga de extraer (date, concepto, amount) de su propio
+    formato de origen; toda la lógica de negocio vive aquí."""
+    cu = concepto.upper()
+
+    # Nota: la exclusión de "Psicoterapia Ayuso" (nómina de María) vivía aquí
+    # hardcodeada; ahora es una regla 'exclude' en la hoja Reglas, aplicada
+    # post-parseo por classifier.apply_exclusions() — ver migrate_rules_to_sheet.py.
+
+    # Salary / reimbursements from DiverInvest
+    if 'DIVERINVEST' in cu:
+        if amount > 0:
+            desc = 'Nómina DiverInvest' if 'NOMINA' in cu or 'NÓMINA' in cu else f'DiverInvest: {concepto}'
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='income', bank='Openbank')
+
+    # ATM cash withdrawal
+    if 'CAJERO' in cu or ('DISPOSICION' in cu and 'CAJERO' in cu):
+        return Transaction(date=date, description=f'Cajero {abs(amount):.0f}€',
+                           amount=abs(amount), tx_type='cash_withdrawal', bank='Openbank')
+
+    # Revolut top-ups (loading Revolut via Openbank card)
+    if 'REVOLUT' in cu and amount < 0:
+        return Transaction(date=date, description=concepto, amount=abs(amount),
+                           tx_type='internal', bank='Openbank')
+
+    # Internal transfers (own accounts, incl. Trade Republic aliases)
+    if (_is_internal(concepto) or 'TRADE REPÚBLIC' in cu
+            or 'TRADE REPÚBLICA' in cu or 'TRADE REPUBLIC' in cu):
+        return Transaction(date=date, description=concepto, amount=abs(amount),
+                           tx_type='internal', bank='Openbank')
+
+    # Card refunds
+    if 'ABONO EN LA TARJETA' in cu:
+        return Transaction(date=date, description='Devolución tarjeta', amount=abs(amount),
+                           tx_type='income', bank='Openbank')
+
+    # Direct debits
+    if 'RECIBO' in cu:
+        desc = re.sub(r'\s*Nº RECIBO.*', '', concepto, flags=re.I).strip()
+        return Transaction(date=date, description=desc, amount=abs(amount),
+                           tx_type='expense', bank='Openbank')
+
+    # Expenses (negative amount)
+    if amount < 0:
+        desc = _clean_openbank_desc(concepto)
+        return Transaction(date=date, description=desc, amount=abs(amount),
+                           tx_type='expense', bank='Openbank')
+
+    # Income (positive, not already handled)
+    if amount > 0:
+        if 'BIZUM DE' in cu:
+            desc = re.sub(r'^BIZUM DE\s*', '', concepto, flags=re.I)
+            desc = re.sub(r'\s+CONCEPTO.*', '', desc, flags=re.I).strip()
+            return Transaction(date=date, description=f'Bizum de {desc}',
+                               amount=amount, tx_type='income', bank='Openbank')
+        return Transaction(date=date, description=concepto, amount=amount,
+                           tx_type='income', bank='Openbank')
+
+    return None
 
 
 def detect_bank(filename: str, content_hint: str = '') -> str:
@@ -313,8 +378,14 @@ class TradeRepublicParser:
         balance_numeric = [t for t in balance_words if re.search(r'\d', t)]
         current_balance = _parse_amount(' '.join(balance_numeric[:1]))
 
-        # Interest / bonuses → income
-        if any(k in tipo for k in ('Interés', 'Bonificación')):
+        # Interest / bonuses / dividends → income
+        if any(k in tipo for k in ('Interés', 'Bonificación', 'Rentabilidad')):
+            # amount may land in desc column due to layout variance; extract it from desc tail
+            if not entrada and desc:
+                m = re.search(r'([\d.,]+)\s*$', desc)
+                if m:
+                    entrada = _parse_amount(m.group(1))
+                    desc = desc[:m.start()].strip()
             if entrada:
                 return Transaction(date=date, description=desc or tipo, amount=entrada,
                                    tx_type='income', bank='Trade Republic'), current_balance
@@ -408,58 +479,7 @@ class OpenbankParser:
         except ValueError:
             return None
 
-        cu = concepto.upper()
-
-        # Salary / reimbursements from DiverInvest
-        if 'DIVERINVEST' in cu:
-            if amount > 0:
-                desc = 'Nómina DiverInvest' if 'NOMINA' in cu or 'NÓMINA' in cu else f'DiverInvest: {concepto}'
-                return Transaction(date=date, description=desc, amount=amount,
-                                   tx_type='income', bank='Openbank')
-
-        # ATM cash withdrawal
-        if 'CAJERO' in cu or ('DISPOSICION' in cu and 'CAJERO' in cu):
-            return Transaction(date=date, description=f'Cajero {abs(amount):.0f}€',
-                               amount=abs(amount), tx_type='cash_withdrawal', bank='Openbank')
-
-        # Revolut top-ups (loading Revolut via Openbank card)
-        if 'REVOLUT' in cu and amount < 0:
-            return Transaction(date=date, description=concepto, amount=abs(amount),
-                               tx_type='internal', bank='Openbank')
-
-        # Internal transfers (own accounts)
-        if _is_internal(concepto):
-            return Transaction(date=date, description=concepto, amount=abs(amount),
-                               tx_type='internal', bank='Openbank')
-
-        # Card refunds
-        if 'ABONO EN LA TARJETA' in cu:
-            return Transaction(date=date, description='Devolución tarjeta', amount=abs(amount),
-                               tx_type='income', bank='Openbank')
-
-        # Direct debits
-        if 'RECIBO' in cu:
-            desc = re.sub(r'\s*Nº RECIBO.*', '', concepto, flags=re.I).strip()
-            return Transaction(date=date, description=desc, amount=abs(amount),
-                               tx_type='expense', bank='Openbank')
-
-        # Expenses (negative amount)
-        if amount < 0:
-            desc = _clean_openbank_desc(concepto)
-            return Transaction(date=date, description=desc, amount=abs(amount),
-                               tx_type='expense', bank='Openbank')
-
-        # Income (positive, not already handled)
-        if amount > 0:
-            if 'BIZUM DE' in cu:
-                desc = re.sub(r'^BIZUM DE\s*', '', concepto, flags=re.I)
-                desc = re.sub(r'\s+CONCEPTO.*', '', desc, flags=re.I).strip()
-                return Transaction(date=date, description=f'Bizum de {desc}',
-                                   amount=amount, tx_type='income', bank='Openbank')
-            return Transaction(date=date, description=concepto, amount=amount,
-                               tx_type='income', bank='Openbank')
-
-        return None
+        return _classify_openbank(date, concepto, amount)
 
 
 # ── Openbank PDF Parser ────────────────────────────────────────────────────────
@@ -529,49 +549,18 @@ class OpenbankPDFParser:
         except ValueError:
             return None
 
+        # Cap concepto to the vertical range of the first importe to avoid spill from next tx
+        importe_top = importe_words[0]['top']
         concepto_words = [w['text'] for w in all_words
                           if self.X_CONCEPTO <= w['x0'] < self.X_IMPORTE
+                          and w['top'] <= importe_top + 6
                           and not self._NOISE.match(w['text'])
                           and not self._DATE_RE.match(w['text'])]
         concepto = ' '.join(concepto_words).strip()
         if not concepto:
             return None
 
-        cu = concepto.upper()
-
-        if 'DIVERINVEST' in cu:
-            if amount > 0:
-                desc = 'Nómina DiverInvest' if 'NOMINA' in cu or 'NÓMINA' in cu else f'DiverInvest: {concepto}'
-                return Transaction(date=date, description=desc, amount=amount,
-                                   tx_type='income', bank='Openbank')
-
-        if 'CAJERO' in cu or 'DISPOSICION' in cu:
-            return Transaction(date=date, description=f'Cajero {abs(amount):.0f}€',
-                               amount=abs(amount), tx_type='cash_withdrawal', bank='Openbank')
-
-        if 'REVOLUT' in cu and amount < 0:
-            return Transaction(date=date, description=concepto, amount=abs(amount),
-                               tx_type='internal', bank='Openbank')
-
-        if _is_internal(concepto):
-            return Transaction(date=date, description=concepto, amount=abs(amount),
-                               tx_type='internal', bank='Openbank')
-
-        if amount < 0:
-            desc = _clean_openbank_desc(concepto)
-            return Transaction(date=date, description=desc, amount=abs(amount),
-                               tx_type='expense', bank='Openbank')
-
-        if amount > 0:
-            if 'BIZUM DE' in cu:
-                desc = re.sub(r'^BIZUM DE\s*', '', concepto, flags=re.I)
-                desc = re.sub(r'\s+CONCEPTO.*', '', desc, flags=re.I).strip()
-                return Transaction(date=date, description=f'Bizum de {desc}',
-                                   amount=amount, tx_type='income', bank='Openbank')
-            return Transaction(date=date, description=concepto, amount=amount,
-                               tx_type='income', bank='Openbank')
-
-        return None
+        return _classify_openbank(date, concepto, amount)
 
 
 # ── Revolut PDF Parser ─────────────────────────────────────────────────────────
@@ -747,195 +736,7 @@ class OpenbankCuentasPDFParser:
         return transactions
 
     def _classify(self, date: datetime, description: str, amount: float) -> Optional[Transaction]:
-        cu = description.upper()
-
-        if 'CAJERO' in cu or 'DISPOSICION' in cu:
-            return Transaction(date=date, description=f'Cajero {abs(amount):.0f}€',
-                               amount=abs(amount), tx_type='cash_withdrawal', bank='Openbank')
-
-        if _is_internal(description) or 'TRADE REPÚBLIC' in cu or 'TRADE REPÚBLICA' in cu or 'TRADE REPUBLIC' in cu:
-            return Transaction(date=date, description=description, amount=abs(amount),
-                               tx_type='internal', bank='Openbank')
-
-        if amount < 0:
-            desc = _clean_openbank_desc(description)
-            return Transaction(date=date, description=desc, amount=abs(amount),
-                               tx_type='expense', bank='Openbank')
-
-        if amount > 0:
-            if 'BIZUM DE' in cu:
-                desc = re.sub(r'^BIZUM DE\s*', '', description, flags=re.I)
-                desc = re.sub(r'\s+CONCEPTO.*', '', desc, flags=re.I).strip()
-                return Transaction(date=date, description=f'Bizum de {desc}',
-                                   amount=amount, tx_type='income', bank='Openbank')
-            return Transaction(date=date, description=description, amount=amount,
-                               tx_type='income', bank='Openbank')
-
-        return None
-
-
-# ── Trade Republic PDF Parser v2 (new statement format) ───────────────────────
-
-class TradeRepublicPDFParserV2:
-    """
-    Parse Trade Republic account statement PDFs in the newer format (post-2025).
-
-    Text-based approach using extract_text() since the layout is clean.
-    Transactions appear between "TRANSACCIONES DE CUENTA" and "RESUMEN DEL BALANCE".
-
-    Each transaction block (2-4 lines):
-      Line A: "DD mmm" (date part 1, sometimes with inline description)
-      Line B: "YYYY"  (year, sometimes with TIPO and description)
-      → TIPO and DESCRIPCIÓN can appear on either line, the year always on a standalone line
-      → IMPORTE: "X.XXX,XX €" (second-to-last amount) | BALANCE: "X.XXX,XX €" (last)
-
-    The amount regex finds all "X.XXX,XX €" tokens; last = balance, second-to-last = importe.
-    """
-
-    _DATE_PART_RE = re.compile(r'^(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\s*(.*)$', re.IGNORECASE)
-    _YEAR_RE = re.compile(r'^(\d{4})\s*(.*)$')
-    _AMOUNT_RE = re.compile(r'(\d{1,3}(?:\.\d{3})*,\d{2})\s*€')
-    _TIPO_RE = re.compile(r'^(Interés|Operar|Transferencia|Transacción)', re.IGNORECASE)
-
-    _SECTION_START = re.compile(r'TRANSACCIONES\s+DE\s+CUENTA', re.IGNORECASE)
-    _SECTION_END = re.compile(r'RESUMEN\s+DEL\s+BALANCE', re.IGNORECASE)
-    _NOISE_RE = re.compile(
-        r'^(TRADE REPUBLIC|FECHA|TIPO|DESCRIPCI|PRODUCTO|BALANCE|RESUMEN\s+DE\s+ESTADO|CUENTAS\s+COL|Deutsche|Creado|Página|NOTAS)',
-        re.IGNORECASE,
-    )
-
-    def parse(self, pdf_path: str) -> list[Transaction]:
-        raw_lines: list[str] = []
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text() or ''
-                raw_lines.extend(text.splitlines())
-
-        # Extract only the transaction section
-        in_section = False
-        section_lines: list[str] = []
-        for line in raw_lines:
-            line = line.strip()
-            if not line:
-                continue
-            if self._SECTION_START.search(line):
-                in_section = True
-                continue
-            if in_section and self._SECTION_END.search(line):
-                break
-            if in_section:
-                if not self._NOISE_RE.match(line):
-                    section_lines.append(line)
-
-        # Group into blocks: a block starts when we see a date line "DD mmm ..."
-        blocks: list[list[str]] = []
-        current: list[str] = []
-        for line in section_lines:
-            if self._DATE_PART_RE.match(line):
-                if current:
-                    blocks.append(current)
-                current = [line]
-            elif current:
-                current.append(line)
-        if current:
-            blocks.append(current)
-
-        transactions: list[Transaction] = []
-        for block in blocks:
-            tx = self._parse_block(block)
-            if tx:
-                transactions.append(tx)
-        return transactions
-
-    def _parse_block(self, block: list[str]) -> Optional[Transaction]:
-        full_text = ' '.join(block)
-
-        # Extract date: day + month from line 0, year from the "YYYY" standalone
-        m_date = self._DATE_PART_RE.match(block[0])
-        if not m_date:
-            return None
-        day, mon, rest0 = m_date.groups()
-        month = MONTH_ES.get(mon.lower()[:3])
-        if not month:
-            return None
-
-        year = None
-        other_parts: list[str] = [rest0.strip()] if rest0.strip() else []
-        for line in block[1:]:
-            m_year = self._YEAR_RE.match(line)
-            if m_year and year is None:
-                y_str, rest = m_year.groups()
-                if 2020 <= int(y_str) <= 2030:
-                    year = int(y_str)
-                    if rest.strip():
-                        other_parts.append(rest.strip())
-                    continue
-            other_parts.append(line.strip())
-
-        if not year:
-            return None
-        try:
-            date = datetime(year, month, int(day))
-        except ValueError:
-            return None
-
-        # Extract all amounts from full_text
-        amounts = self._AMOUNT_RE.findall(full_text)
-        if not amounts:
-            return None
-        # Last = balance, second-to-last = importe (or only one = importe)
-        importe_str = amounts[-2] if len(amounts) >= 2 else amounts[-1]
-        raw = importe_str.replace('.', '').replace(',', '.')
-        try:
-            amount = float(raw)
-        except ValueError:
-            return None
-
-        # Determine TIPO: search each part individually since TIPO may not be first
-        tipo = ''
-        for part in other_parts:
-            m_tipo = self._TIPO_RE.match(part.strip())
-            if m_tipo:
-                tipo = m_tipo.group(1)
-                break
-
-        # Build description: join other_parts, strip amounts and tipo keyword
-        combined = ' '.join(other_parts)
-        desc = self._AMOUNT_RE.sub('', combined).strip()
-        desc = re.sub(r'(Interés|Operar|Transferencia|Transacción)\s*(con\s+tarjeta)?\s*', '', desc, flags=re.I).strip()
-        desc = _clean_tr_desc(desc)
-
-        tipo_lower = tipo.lower()
-
-        if 'interés' in tipo_lower or 'bonificación' in tipo_lower:
-            return Transaction(date=date, description=desc or 'Interest payment',
-                               amount=amount, tx_type='income', bank='Trade Republic')
-
-        if 'operar' in tipo_lower:
-            return Transaction(date=date, description=desc, amount=amount,
-                               tx_type='investment', bank='Trade Republic')
-
-        if 'transferencia' in tipo_lower:
-            if _is_internal(desc):
-                return Transaction(date=date, description=desc, amount=amount,
-                                   tx_type='internal', bank='Trade Republic')
-            # Determine direction: "Incoming" or "Outgoing" in description
-            desc_upper = desc.upper()
-            if 'OUTGOING' in desc_upper or 'SALIDA' in desc_upper:
-                return Transaction(date=date, description=desc, amount=amount,
-                                   tx_type='expense', bank='Trade Republic')
-            return Transaction(date=date, description=desc, amount=amount,
-                               tx_type='income', bank='Trade Republic')
-
-        if 'transacción' in tipo_lower or 'tarjeta' in tipo_lower:
-            return Transaction(date=date, description=desc, amount=amount,
-                               tx_type='expense', bank='Trade Republic')
-
-        # Fallback
-        if desc:
-            return Transaction(date=date, description=desc, amount=amount,
-                               tx_type='expense', bank='Trade Republic')
-        return None
+        return _classify_openbank(date, description, amount)
 
 
 # ── Santander PDF Parser ───────────────────────────────────────────────────────

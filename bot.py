@@ -7,10 +7,11 @@ import tempfile
 import threading
 import time
 from datetime import datetime
+from functools import wraps
 
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-from telegram.error import NetworkError
+from telegram.error import NetworkError, Conflict
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ContextTypes,
@@ -24,14 +25,24 @@ from parsers import (
     TradeRepublicParser, OpenbankParser, OpenbankPDFParser, OpenbankCuentasPDFParser,
     RevolutPDFParser, SantanderPDFParser,
 )
-from classifier import classify_batch, classify_cash_text, load_custom_rules, apply_type_overrides
-from sheets import SheetsClient
+from classifier import classify_batch, classify_cash_text, load_custom_rules, apply_type_overrides, apply_exclusions
+from sheets import SheetsClient, is_nomina
 
 import re as _re
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 OWNER_CHAT_ID = os.getenv('OWNER_CHAT_ID')
 WEBAPP_URL = os.getenv('WEBAPP_URL', '')
+ALLOWED_CHAT_IDS: set[int] = {int(x) for x in os.getenv('ALLOWED_CHAT_IDS', '').split(',') if x}
+
+
+def only_allowed(func):
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_chat.id not in ALLOWED_CHAT_IDS:
+            return
+        return await func(update, context)
+    return wrapper
 
 # Aliases de titulares: cualquier variante → nombre canónico guardado en Sheets
 NAME_ALIASES: dict[str, str] = {
@@ -144,6 +155,7 @@ def clear_session(user_data: dict):
 
 # ── Command handlers ───────────────────────────────────────────────────────────
 
+@only_allowed
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = []
     if WEBAPP_URL:
@@ -161,6 +173,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@only_allowed
 async def cmd_webapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not WEBAPP_URL:
         await update.message.reply_text("⚠️ Web app no desplegada aún.")
@@ -173,6 +186,7 @@ async def cmd_webapp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+@only_allowed
 async def cmd_categorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from classifier import RULES
     lines = ["<b>📂 Categorías activas</b>\n"]
@@ -183,17 +197,18 @@ async def cmd_categorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
             kw_preview += f' +{len(keywords) - 4} más'
         lines.append(f"{emoji} <b>{h(category)}</b>: <i>{h(kw_preview)}</i>")
 
-    custom = sheets.get_custom_rules()
+    custom = [r for r in sheets.get_rules() if not r['tipo']]
     if custom:
         lines.append("\n<b>⚙️ Reglas personalizadas</b>")
-        for kw, cat in custom:
-            emoji = CATEGORY_EMOJI.get(cat, '📦')
-            lines.append(f"  • {h(kw)} → {emoji} {h(cat)}")
+        for r in custom:
+            emoji = CATEGORY_EMOJI.get(r['categoria'], '📦')
+            lines.append(f"  • {h(r['keyword'])} → {emoji} {h(r['categoria'])}")
 
     lines.append("\n<i>Para añadir: \"clasifica X como Categoría\"</i>")
     await update.message.reply_html("\n".join(lines))
 
 
+@only_allowed
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     now = datetime.now()
     if context.args:
@@ -221,8 +236,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r for r in sheets._get_all_records()
         if r.get('Mes') == f"{year:04d}-{month:02d}"
         and r.get('Tipo') == 'income'
-        and 'NOMINA' not in r.get('Descripción', '').upper()
-        and 'NÓMINA' not in r.get('Descripción', '').upper()
+        and not is_nomina(r.get('Descripción', ''))
     ]
 
     lines = [f"<b>📊 Resumen {year}-{month:02d}</b>\n"]
@@ -233,8 +247,13 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"{emoji} {h(cat)}: <b>{h(fmt_eur(amount))}</b>  {bar} {pct:.0f}%")
     if income > 0:
         lines.append(f"\n📥 <b>Ingresos recibidos: +{h(fmt_eur(income))}</b>")
-        for r in sorted(income_rows, key=lambda x: abs(float(str(x.get('Importe', 0)).replace(',', '.'))), reverse=True):
-            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        def _safe_amt(r):
+            try:
+                return abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+            except ValueError:
+                return 0.0
+        for r in sorted(income_rows, key=_safe_amt, reverse=True):
+            amt = _safe_amt(r)
             desc = r.get('Descripción', '')[:40]
             lines.append(f"  · {h(desc)}: +{h(fmt_eur(amt))}")
     lines.append(f"💰 <b>Gasto neto: {h(fmt_eur(total))}</b>")
@@ -244,6 +263,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Document handler ───────────────────────────────────────────────────────────
 
+@only_allowed
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc = update.message.document
     filename = doc.file_name or ''
@@ -299,6 +319,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bank_name = 'Openbank'
 
         apply_type_overrides(all_txs)
+        all_txs = apply_exclusions(all_txs)
         # Include expenses + only meaningful income (refunds and incoming bizums)
         expenses = [tx for tx in all_txs
                     if tx.tx_type == 'expense'
@@ -374,6 +395,7 @@ def _match_category(name: str) -> str | None:
 
 # ── Text handler (cash expenses + config commands) ─────────────────────────────
 
+@only_allowed
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
@@ -499,6 +521,7 @@ async def _show_cash_confirm(msg, tx: Transaction, titular: str):
 
 # ── Callback handler ───────────────────────────────────────────────────────────
 
+@only_allowed
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -617,9 +640,13 @@ async def _advance(query, context, session, expenses, idx):
         # All reviewed — show final summary before saving
         total = sum(tx.amount for tx in expenses)
         lines = [f"<b>✅ Revisión completa — {len(expenses)} gastos</b>\n"]
-        for tx in expenses:
+        # Telegram limit is 4096 chars; cap individual listing at 50 to stay safe
+        show = expenses[:50]
+        for tx in show:
             emoji = CATEGORY_EMOJI.get(tx.category, '📦')
             lines.append(f"• {h(tx.fmt_date())}  {h(tx.description[:28])}  <b>{h(tx.fmt_amount())}</b>  {emoji} {h(tx.category)}")
+        if len(expenses) > 50:
+            lines.append(f"<i>… y {len(expenses) - 50} más</i>")
         lines.append(f"\n💰 <b>Total: {h(fmt_eur(total))}</b>")
         await query.edit_message_text(
             "\n".join(lines),
@@ -639,11 +666,11 @@ async def _save_and_done(query, context, expenses):
     """Write expenses to Google Sheets and confirm."""
     await query.edit_message_text("⏳ Guardando en Google Sheets...")
     titular = get_session(context.user_data).get('titular', 'Pablo Cavaller')
-    saved = sheets.write_transactions(expenses, titular=titular)
+    saved_txs = sheets.write_transactions(expenses, titular=titular)
+    saved = len(saved_txs)
     duplicates = len(expenses) - saved
-    total = sum(tx.amount for tx in expenses[:saved]) if saved else 0
     clear_session(context.user_data)
-    msg = f"✅ <b>{saved} transacciones guardadas</b>\n💰 Total: <b>{h(fmt_eur(sum(tx.amount for tx in expenses)))}</b>"
+    msg = f"✅ <b>{saved} transacciones guardadas</b>\n💰 Total: <b>{h(fmt_eur(sum(tx.amount for tx in saved_txs)))}</b>"
     if duplicates:
         msg += f"\n<i>⏭ {duplicates} omitidas por duplicadas</i>"
     msg += "\n\nUsa /resumen para ver el resumen del mes."
@@ -700,8 +727,8 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
 
     async def on_error(update, context):
-        if isinstance(context.error, NetworkError):
-            print(f"NetworkError: {context.error} — exiting for systemd restart")
+        if isinstance(context.error, (NetworkError, Conflict)):
+            print(f"{type(context.error).__name__}: {context.error} — exiting for restart")
             sys.exit(1)
         raise context.error
 

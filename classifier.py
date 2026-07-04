@@ -11,6 +11,9 @@ from parsers import CATEGORIES
 # ── Keyword rules per category ─────────────────────────────────────────────────
 
 RULES: list[tuple[str, list[str]]] = [
+    ('Devolución', [
+        '[DEVOLUCIÓN]', 'DEVOLUCIÓN', 'DEVOLUCION', 'REEMBOLSO', 'REFUND',
+    ]),
     ('Alimentación', [
         'MERCADONA', 'BON PREU', 'AMETLLER', 'GRANIER', 'CORTE INGLES-SUPERMERC',
         'SANTAGLORIA', 'CHURRERIA', 'FORNERIA', 'BONANOVA 96', 'ALIMENTACIO', 'SUPERMERCAT',
@@ -21,6 +24,7 @@ RULES: list[tuple[str, list[str]]] = [
         'MACXIPA',
     ]),
     ('Restaurantes', [
+        'CUL DE SAC', 'IL SARDO', 'GRUP AO VIA AUGUSTA', 'LEVADURAMADRE', 'BOLDU',
         'LENTRECOTE', 'TOMAS DE SARRIA', 'VIPS', 'HEMINGWAY', 'RODILLA', 'CAFETERIA',
         'OCA LOCA', 'CASA PETRA', 'LAS MUNS', 'BAR LA SALA', 'BODEGON', 'DONOSTIA',
         'BURGUER', 'BURGER', 'MCDONALDS', 'MCDONALD', 'MC DONALDS', 'KFC', 'STARBUCKS', 'FOSTER',
@@ -71,6 +75,7 @@ RULES: list[tuple[str, list[str]]] = [
         'AMAZON', 'WWW.AMAZON', 'AMZN ', 'EL CORTE INGLES', 'FNAC', 'MEDIA MARKT',
         'DECATHLON', 'IKEA', 'PRIMARK', 'NIKE', 'ADIDAS',
         'CHARLES TYRWHITT', 'SPRINGFIELD', 'EDWARD', 'ALIEXPRESS',
+        'THE-ARE', 'HOSS INTROPIA', 'TEMU',
         'SINGULARU', 'WETSUIT', 'DRIM', 'NATURA ', 'SP POLO', 'SP OTOMI',
         'BONPRIX', 'MYCORNER', 'ABACUS', 'MULAYA', 'KEBI',
     ]),
@@ -95,7 +100,7 @@ RULES: list[tuple[str, list[str]]] = [
         'INICIATIVES DE L', 'UTE DEVAS',
     ]),
     ('Bizum', [
-        'BIZUM →', 'BIZUM A FAVOR',
+        'BIZUM →', 'BIZUM A FAVOR', 'BIZUM DE',
     ]),
     ('Apuestas', [
         'BETFAIR', 'BWIN', 'CODERE', 'SPORTIUM', 'BET365', 'POKERSTARS',
@@ -120,6 +125,9 @@ RULES: list[tuple[str, list[str]]] = [
     ('Impuestos', [
         'IRPF', 'IMPUESTO', 'HACIENDA', 'AGENCIA TRIBUTARIA',
     ]),
+    ('Boda', [
+        'LUCÍA ALONSO', 'LUCIA ALONSO',
+    ]),
     ('Salud', [
         'FARMACIA', 'CLINICA', 'DOCTOR', 'DENTAL', 'OPTICA', 'FISIO',
         'HOSPITAL', 'MEDICO', 'LABORATORIO', 'BLOOM', 'DR. ', 'DR.',
@@ -127,35 +135,24 @@ RULES: list[tuple[str, list[str]]] = [
 ]
 
 
-# Descriptions that map directly to a tx_type override (not a category)
-# These are checked before category classification in classify_batch.
-TYPE_OVERRIDE_RULES: list[tuple[str, str]] = [
-    # Datafono/nómina transfers from Jose María Samaranch Gallart → internal
-    ('JOSE MARIA SAMARANCH GALLART', 'internal'),
-    ('JOSÉ MARÍA SAMARANCH GALLART', 'internal'),
-    # Trade Republic auto-generated income → internal (not real income)
-    ('CASH REWARD ALLOCATION', 'internal'),
-    ('INTEREST PAYMENT', 'internal'),
-    # María self-transfers between own accounts
-    ('BARROS MARIA ROSALIA CONCEPTO', 'internal'),
-    ('RUISANCHEZ GONZALEZ-BARROS MARIA ROSALIA', 'internal'),
-    ('RUISANCHEZ GONZALEZ BARROS MARIA ROSALIA', 'internal'),
-    # TR outgoing transfers to own accounts → internal
-    ('OUTGOING TRANSFER FOR MARIA ROSALIA RUIS', 'internal'),
-    # Reimbursements excluded from income
-    ('MIRIAM B M', 'internal'),
-    ('BLANCA D P', 'internal'),
-    ('ANA D R', 'internal'),
-]
-
+# Reglas de tipo/exclusión persona-específicas (antes hardcodeadas aquí como
+# TYPE_OVERRIDE_RULES): ahora viven en la hoja "Reglas" de Google Sheets, en la
+# columna Tipo, junto a las reglas de categoría. Ver migrate_rules_to_sheet.py
+# para la migración de las reglas que vivían aquí antes del refactor de 2026-07.
 _custom_rules: list[tuple[str, str]] = []
+_exclude_rules: list[str] = []
+_override_rules: list[tuple[str, str]] = []
 _learned: dict[str, str] = {}
 
 
 def load_custom_rules(sheets_client) -> None:
-    """Load user-defined rules and historical classifications from Google Sheets."""
-    global _custom_rules, _learned
-    _custom_rules = sheets_client.get_custom_rules()
+    """Load category rules, exclusions and type overrides (all from the Reglas
+    sheet) plus historical classifications from Google Sheets."""
+    global _custom_rules, _exclude_rules, _override_rules, _learned
+    rules = sheets_client.get_rules()
+    _custom_rules = [(r['keyword'], r['categoria']) for r in rules if not r['tipo']]
+    _exclude_rules = [r['keyword'] for r in rules if r['tipo'] == 'exclude']
+    _override_rules = [(r['keyword'], r['tipo']) for r in rules if r['tipo'] and r['tipo'] != 'exclude']
     _learned = sheets_client.get_learned_classifications()
 
 
@@ -180,13 +177,22 @@ def classify_batch(transactions: list[Transaction]) -> list[str]:
 
 
 def apply_type_overrides(transactions: list[Transaction]) -> None:
-    """Mutate tx_type to 'internal' for transactions matching TYPE_OVERRIDE_RULES."""
+    """Mutate tx_type for transactions matching a type-override rule from the Reglas sheet."""
     for tx in transactions:
         desc_upper = tx.description.upper()
-        for keyword, tx_type in TYPE_OVERRIDE_RULES:
-            if keyword.upper() in desc_upper:
+        for keyword, tx_type in _override_rules:
+            if keyword in desc_upper:
                 tx.tx_type = tx_type
                 break
+
+
+def apply_exclusions(transactions: list[Transaction]) -> list[Transaction]:
+    """Filter out transactions matching an 'exclude' rule from the Reglas sheet
+    (e.g. María's Psicoterapia Ayuso salary — not part of the tracked finances)."""
+    if not _exclude_rules:
+        return transactions
+    return [tx for tx in transactions
+            if not any(kw in tx.description.upper() for kw in _exclude_rules)]
 
 
 def classify_cash_text(text: str) -> tuple[float, str, str]:

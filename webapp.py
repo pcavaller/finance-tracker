@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Finance Tracker Web App"""
 
+import hashlib
+import hmac
+import json
 import os
 import tempfile
+import time
 import uuid
 from datetime import datetime
 from typing import Optional
+from urllib.parse import parse_qsl
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, HTTPException, File, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, UploadFile, HTTPException, File, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -20,10 +25,45 @@ from parsers import (
     detect_bank, TradeRepublicParser, OpenbankParser,
     OpenbankPDFParser, RevolutPDFParser, Transaction,
 )
-from classifier import classify_batch, load_custom_rules, apply_type_overrides
-from sheets import SheetsClient
+from classifier import classify_batch, load_custom_rules, apply_type_overrides, apply_exclusions
+from sheets import SheetsClient, is_nomina
+
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
+ALLOWED_CHAT_IDS: set[int] = {int(x) for x in os.getenv('ALLOWED_CHAT_IDS', '').split(',') if x}
 
 app = FastAPI(title="Finance Tracker")
+
+
+def _check_telegram_init_data(init_data: str, max_age_seconds: int = 86400) -> dict | None:
+    """Validate a Telegram WebApp initData string per Telegram's HMAC scheme.
+    Returns the decoded `user` dict if valid and fresh, None otherwise."""
+    if not init_data:
+        return None
+    parsed = dict(parse_qsl(init_data, keep_blank_values=True))
+    received_hash = parsed.pop('hash', None)
+    if not received_hash:
+        return None
+    data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted(parsed.items()))
+    secret_key = hmac.new(b"WebAppData", TELEGRAM_TOKEN.encode(), hashlib.sha256).digest()
+    computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed_hash, received_hash):
+        return None
+    if time.time() - int(parsed.get('auth_date', 0)) > max_age_seconds:
+        return None
+    try:
+        return json.loads(parsed.get('user', '{}'))
+    except json.JSONDecodeError:
+        return None
+
+
+async def require_telegram_user(x_telegram_init_data: str = Header(default='')) -> dict:
+    user = _check_telegram_init_data(x_telegram_init_data)
+    if not user or user.get('id') not in ALLOWED_CHAT_IDS:
+        raise HTTPException(403, "No autorizado.")
+    return user
+
+
+api = APIRouter(prefix="/api", dependencies=[Depends(require_telegram_user)])
 
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
@@ -53,12 +93,12 @@ def _tx_to_dict(tx: Transaction) -> dict:
     }
 
 
-@app.get("/api/people")
+@api.get("/people")
 async def get_people():
     return {"people": sheets.get_titulares()}
 
 
-@app.post("/api/upload")
+@api.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     filename = file.filename or ''
     mime = file.content_type or ''
@@ -94,7 +134,14 @@ async def upload_file(file: UploadFile = File(...)):
             bank_name = 'Openbank'
 
         apply_type_overrides(all_txs)
-        expenses = [tx for tx in all_txs if tx.tx_type in ('expense', 'income')]
+        all_txs = apply_exclusions(all_txs)
+        expenses = [tx for tx in all_txs
+                    if tx.tx_type == 'expense'
+                    or (tx.tx_type == 'income' and (
+                        '[Devolución]' in tx.description
+                        or 'Bizum de' in tx.description
+                        or 'BIZUM DE' in tx.description.upper()
+                    ))]
         excluded = len(all_txs) - len(expenses)
 
         categories = classify_batch(expenses)
@@ -122,7 +169,7 @@ class SaveRequest(BaseModel):
     transactions: list[dict]
 
 
-@app.post("/api/save/{session_id}")
+@api.post("/save/{session_id}")
 async def save_session(session_id: str, body: SaveRequest):
     session = sessions.get(session_id)
     if not session:
@@ -137,14 +184,14 @@ async def save_session(session_id: str, body: SaveRequest):
             txs[i].category = tx_data.get('category', txs[i].category)
             to_save.append(txs[i])
 
-    sheets.write_transactions(to_save, titular=body.titular)
+    saved_txs = sheets.write_transactions(to_save, titular=body.titular)
     sheets.add_titular(body.titular)
     del sessions[session_id]
 
-    return {'saved': len(to_save), 'total': sum(tx.amount for tx in to_save)}
+    return {'saved': len(saved_txs), 'total': sum(tx.amount for tx in saved_txs)}
 
 
-@app.get("/api/summary")
+@api.get("/summary")
 async def get_summary(year: int = None, month: int = None, titular: str = None):
     now = datetime.now()
     year = year or now.year
@@ -161,8 +208,7 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
         if r.get('Banco', '') == 'Santander':
             continue
         desc = r.get('Descripción', '')
-        desc_up = desc.upper()
-        if 'NOMINA' in desc_up or 'NÓMINA' in desc_up:
+        if is_nomina(desc):
             continue
         if titular and r.get('Titular', '') != titular:
             continue
@@ -176,7 +222,7 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
     return {'summary': summary, 'total': total, 'income': income, 'income_items': income_items, 'year': year, 'month': month}
 
 
-@app.get("/api/transactions")
+@api.get("/transactions")
 async def get_transactions(year: int = None, month: int = None, titular: str = None):
     now = datetime.now()
     year = year or now.year
@@ -185,12 +231,12 @@ async def get_transactions(year: int = None, month: int = None, titular: str = N
     return {'transactions': txs}
 
 
-@app.get("/api/months")
+@api.get("/months")
 async def get_months(titular: str = None):
     return {'months': sheets.get_months_with_data(titular=titular or None)}
 
 
-@app.get("/api/annual")
+@api.get("/annual")
 async def get_annual(year: int = None, titular: str = None):
     now = datetime.now()
     year = year or now.year
@@ -214,8 +260,7 @@ async def get_annual(year: int = None, titular: str = None):
             cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
             month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
         elif tipo == 'income' and r.get('Banco', '') != 'Santander':
-            desc = r.get('Descripción', '').upper()
-            if 'NOMINA' not in desc and 'NÓMINA' not in desc:
+            if not is_nomina(r.get('Descripción', '')):
                 month_income[mes] = month_income.get(mes, 0.0) + amt
     all_months = sorted(set(list(month_expenses.keys()) + list(month_income.keys())))
     sorted_months = [{'month': m, 'total': round(month_expenses.get(m, 0) - month_income.get(m, 0), 2)} for m in all_months if month_expenses.get(m, 0) > 0]
@@ -224,7 +269,7 @@ async def get_annual(year: int = None, titular: str = None):
     return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': net_total}
 
 
-@app.get("/api/monthly_totals")
+@api.get("/monthly_totals")
 async def get_monthly_totals(titular: str = None):
     rows = sheets._get_all_records()
     totals: dict[str, float] = {}
@@ -251,7 +296,7 @@ class UpdateCategoryRequest(BaseModel):
     category: str
 
 
-@app.patch("/api/transaction/category")
+@api.patch("/transaction/category")
 async def update_transaction_category(body: UpdateCategoryRequest):
     ok = sheets.update_transaction_category(
         body.fecha, body.descripcion, body.amount, body.banco, body.category
@@ -261,7 +306,7 @@ async def update_transaction_category(body: UpdateCategoryRequest):
     return {"ok": True}
 
 
-@app.get("/api/search")
+@api.get("/search")
 async def search_transactions(q: str = '', titular: str = None):
     if len(q) < 2:
         return {'transactions': []}
@@ -293,4 +338,5 @@ async def search_transactions(q: str = '', titular: str = None):
     return {'transactions': results[:150]}
 
 
+app.include_router(api)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

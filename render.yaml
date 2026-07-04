@@ -15,3 +15,5 @@ services:
         sync: false
       - key: WEBAPP_URL
         sync: false
+      - key: ALLOWED_CHAT_IDS
+        sync: false

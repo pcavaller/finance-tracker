@@ -621,6 +621,19 @@
     x-text="toast.message"></div>
 
 <script>
+// Auth: adjunta el initData de Telegram a toda petición same-origin a /api/*
+// para que el backend pueda validar quién llama (ver require_telegram_user en webapp.py).
+(() => {
+  const _fetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url.startsWith('/api/')) {
+      init = { ...init, headers: { ...(init.headers || {}), 'X-Telegram-Init-Data': window.Telegram?.WebApp?.initData || '' } };
+    }
+    return _fetch(input, init);
+  };
+})();
+
 const CATEGORY_EMOJIS = {
   'Alimentación': '🛒',
   'Restaurantes': '🍽',
