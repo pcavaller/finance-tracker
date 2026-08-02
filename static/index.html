@@ -177,7 +177,7 @@
     <div x-show="view === 'upload'">
       <div class="mt-6">
         <h2 class="text-xl font-bold text-gray-900">Subir extracto</h2>
-        <p class="text-sm text-gray-500 mt-1">Formatos: PDF (Trade Republic) o XLS (Openbank)</p>
+        <p class="text-sm text-gray-500 mt-1">Formatos: PDF (Trade Republic, Openbank) o XLS/XLSX (Openbank, BBVA)</p>
       </div>
 
       <!-- Drop zone -->
@@ -190,13 +190,13 @@
         <div x-show="!uploading">
           <p class="text-4xl mb-3">📁</p>
           <p class="font-semibold text-gray-700">Arrastra aquí o haz clic para seleccionar</p>
-          <p class="text-sm text-gray-400 mt-1">PDF extracto Trade Republic · XLS movimientos Openbank</p>
+          <p class="text-sm text-gray-400 mt-1">PDF extracto Trade Republic/Openbank · XLS/XLSX Openbank/BBVA</p>
         </div>
         <div x-show="uploading" class="py-4">
           <div class="inline-block w-8 h-8 border-3 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
           <p class="text-gray-500 mt-3 text-sm">Procesando transacciones...</p>
         </div>
-        <input type="file" x-ref="fileInput" class="hidden" accept=".pdf,.xls,.html"
+        <input type="file" x-ref="fileInput" class="hidden" accept=".pdf,.xls,.xlsx,.html"
           @change="handleFileSelect($event)">
       </div>
 
@@ -654,6 +654,8 @@ const CATEGORY_EMOJIS = {
   'Viajes': '✈️',
   'Impuestos': '🏛',
   'Devolución': '↩️',
+  'Hipoteca': '🏦',
+  'Compra vivienda': '🏡',
   'Otros': '📦',
 };
 

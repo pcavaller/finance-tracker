@@ -23,7 +23,7 @@ from parsers import (
     Transaction, CATEGORIES, CATEGORY_EMOJI,
     detect_bank, _detect_bank_from_pdf,
     TradeRepublicParser, OpenbankParser, OpenbankPDFParser, OpenbankCuentasPDFParser,
-    RevolutPDFParser, SantanderPDFParser,
+    RevolutPDFParser, SantanderPDFParser, BBVAParser,
 )
 from classifier import classify_batch, classify_cash_text, load_custom_rules, apply_type_overrides, apply_exclusions
 from sheets import SheetsClient, is_nomina
@@ -285,7 +285,12 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     msg = await update.message.reply_text(f"⏳ Procesando {h(filename)}...")
 
-    suffix = '.pdf' if 'pdf' in mime or 'pdf' in filename.lower() else '.xls'
+    if filename.lower().endswith('.xlsx'):
+        suffix = '.xlsx'
+    elif 'pdf' in mime or 'pdf' in filename.lower():
+        suffix = '.pdf'
+    else:
+        suffix = '.xls'
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         file = await doc.get_file()
@@ -314,6 +319,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif bank_key == 'openbank_cuentas':
             all_txs = OpenbankCuentasPDFParser().parse(tmp_path)
             bank_name = 'Openbank'
+        elif bank_key == 'bbva':
+            all_txs = BBVAParser().parse(tmp_path)
+            bank_name = 'BBVA'
         else:
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'

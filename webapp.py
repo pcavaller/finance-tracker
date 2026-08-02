@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 from parsers import (
     detect_bank, TradeRepublicParser, OpenbankParser,
-    OpenbankPDFParser, RevolutPDFParser, Transaction,
+    OpenbankPDFParser, RevolutPDFParser, Transaction, BBVAParser,
 )
 from classifier import classify_batch, load_custom_rules, apply_type_overrides, apply_exclusions
 from sheets import SheetsClient, is_nomina
@@ -112,7 +112,12 @@ async def upload_file(file: UploadFile = File(...)):
         else:
             raise HTTPException(400, "Archivo no reconocido.")
 
-    suffix = '.pdf' if (bank_key in ('trade_republic', 'openbank_pdf', 'revolut') or filename.lower().endswith('.pdf')) else '.xls'
+    if filename.lower().endswith('.xlsx'):
+        suffix = '.xlsx'
+    elif bank_key in ('trade_republic', 'openbank_pdf', 'revolut') or filename.lower().endswith('.pdf'):
+        suffix = '.pdf'
+    else:
+        suffix = '.xls'
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         content = await file.read()
@@ -129,6 +134,9 @@ async def upload_file(file: UploadFile = File(...)):
         elif bank_key == 'revolut':
             all_txs = RevolutPDFParser().parse(tmp_path)
             bank_name = 'Revolut'
+        elif bank_key == 'bbva':
+            all_txs = BBVAParser().parse(tmp_path)
+            bank_name = 'BBVA'
         else:
             all_txs = OpenbankParser().parse(tmp_path)
             bank_name = 'Openbank'

@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 import re
+import unicodedata
 
 import pdfplumber
+import openpyxl
 from bs4 import BeautifulSoup
 
 MONTH_ES = {
@@ -34,6 +36,8 @@ CATEGORIES = [
     'Viajes',
     'Impuestos',
     'Boda',
+    'Hipoteca',
+    'Compra vivienda',
     'Otros',
 ]
 
@@ -57,6 +61,8 @@ CATEGORY_EMOJI = {
     'Viajes': '✈️',
     'Impuestos': '🏛',
     'Devolución': '↩️',
+    'Hipoteca': '🏦',
+    'Compra vivienda': '🏡',
     'Otros': '📦',
 }
 
@@ -89,7 +95,7 @@ class Transaction:
     date: datetime
     description: str
     amount: float       # always positive; direction determined by tx_type
-    tx_type: str        # 'expense' | 'income' | 'internal' | 'investment' | 'cash_withdrawal'
+    tx_type: str        # 'expense' | 'income' | 'internal' | 'investment' | 'patrimonio' | 'cash_withdrawal'
     bank: str
     category: str = ''
 
@@ -137,6 +143,28 @@ def _parse_date_es(s: str) -> Optional[datetime]:
 def _is_internal(description: str) -> bool:
     d = description.upper()
     return any(k.upper() in d for k in OWN_ACCOUNT_KEYWORDS)
+
+
+def _strip_accents(s: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFKD', str(s or '')) if not unicodedata.combining(c))
+
+
+def disambiguate_duplicates(transactions: list[Transaction]) -> None:
+    """Mutates descriptions in-place when two or more transactions in the same
+    import batch would collide on the Sheets dedupe key (fecha + descripción +
+    importe con signo + banco — ver `SheetsClient.write_transactions` en
+    sheets.py) despite being genuinely distinct movements, p.ej. dos cheques
+    bancarios idénticos emitidos el mismo día. Sin esto, `write_transactions`
+    descartaría el segundo como si fuera un duplicado real."""
+    groups: dict[tuple, list[Transaction]] = {}
+    for tx in transactions:
+        importe = -tx.amount if tx.tx_type == 'expense' else tx.amount
+        key = (tx.fmt_date(), tx.description, round(importe, 2), tx.bank)
+        groups.setdefault(key, []).append(tx)
+    for group in groups.values():
+        if len(group) > 1:
+            for i, tx in enumerate(group, start=1):
+                tx.description = f"{tx.description} ({i}/{len(group)})"
 
 
 def _clean_tr_desc(s: str) -> str:
@@ -220,6 +248,12 @@ def _classify_openbank(date: datetime, concepto: str, amount: float) -> Optional
 def detect_bank(filename: str, content_hint: str = '') -> str:
     import os
     name = os.path.basename(filename).lower()
+    name_noaccent = _strip_accents(name)
+    # BBVA app exports are named "<algo> - Últimos movimientos.xlsx" con timestamp,
+    # sin ninguna palabra reconocible como "bbva" en el nombre — hay que mirar este
+    # patrón de nombre antes que el genérico 'movimientos' de Openbank más abajo.
+    if name.endswith('.xlsx') and ('ultimos movimientos' in name_noaccent or 'informe bbva' in name_noaccent):
+        return 'bbva'
     if 'extracto' in name or 'trade' in name or 'republic' in name:
         return 'trade_republic'
     if 'movimientos' in name or 'openbank' in name or 'cuenta' in name:
@@ -867,3 +901,155 @@ class SantanderPDFParser:
             tx_type=tx_type,
             bank='Santander',
         )
+
+
+# ── BBVA xlsx Parser ───────────────────────────────────────────────────────────
+
+# Identidades propias reconocidas como contraparte en transferencias BBVA
+# (cuentas Conjunta / Pablo Cavaller personal, agosto 2026 — compra de vivienda).
+# Cualquier transferencia de los 4 tipos de abajo cuya contraparte matchee una
+# de estas es reasignación de dinero propio, no ingreso/gasto real.
+_BBVA_OWN_IDENTITIES = [
+    'PABLO CAVALLER GRAU', 'PABLO CAVALLER', 'PABLO BBVA',
+    'MARIA RUISANCHEZ', 'RUISANCHEZ GONZALEZ-BARROS', 'BBVA MERI', 'MERI',
+    'MYINVESTO', 'MYINVESTOR', 'ACTIVAR',
+]
+
+_BBVA_TRANSFER_CONCEPTS = {
+    'TRANSFERENCIA RECIBIDA', 'TRANSFERENCIA REALIZADA',
+    'TRASPASO DESDE CUENTA', 'TRASPASO A CUENTA',
+}
+
+# Compra de vivienda (evento puntual, julio 2026): abono del préstamo, seguros,
+# cheques bancarios y tasación → Tipo 'patrimonio', fuera del cash flow mensual.
+_BBVA_VIVIENDA_CONCEPTS = {
+    'ADEUDO DE SEGUROS',
+    'ABONO POR DISPOSICION DE PRESTAMO/CREDITO',
+    'CARGO POR EMISION DE CHEQUE BANCARIO',
+}
+_BBVA_VIVIENDA_TASACION_PREFIX = 'ADEUDO TECNICOS EN TASACION'
+
+# Hipoteca (coste recurrente, SÍ cuenta en cash flow) → Tipo 'expense'.
+_BBVA_HIPOTECA_CONCEPT = 'CARGO POR INTERESES DE PRESTAMO'
+
+
+def _norm_bbva(s: str) -> str:
+    return _strip_accents(str(s or '')).upper().strip()
+
+
+def _is_bbva_known_counterparty(*texts: str) -> bool:
+    """Contraparte conocida (propia) para transferencias BBVA. Combina la lista
+    explícita de identidades del negocio con la lista global `OWN_ACCOUNT_KEYWORDS`
+    (Trade Republic, Sabadell...) ya usada por el resto de parsers, más un match
+    laxo para María cuando el nombre viene truncado de forma distinta a las
+    variantes conocidas (p.ej. "Maria Rosalia Ruisanchez Gonz...", sin que
+    "Ruisanchez Gonzalez-Barros" ni "Maria Ruisanchez" aparezcan literalmente)."""
+    combined = ' '.join(texts)
+    n = _norm_bbva(combined)
+    if any(_norm_bbva(kw) in n for kw in _BBVA_OWN_IDENTITIES):
+        return True
+    if 'RUISANCHEZ' in n and 'MARIA' in n:
+        return True
+    return _is_internal(combined)
+
+
+class BBVAParser:
+    """
+    Parse BBVA 'Últimos movimientos' xlsx exports (personal o conjunta, mismo
+    formato para ambas — el titular se decide fuera del parser, al llamar a
+    `SheetsClient.write_transactions(titular=...)`, igual que con el resto de
+    parsers del repo).
+
+    Hoja única 'Informe BBVA', cabecera real localizada dinámicamente (suele
+    caer en la fila 5, pero no se asume): F.Valor, Fecha, Concepto, Movimiento,
+    Importe, Divisa, Disponible, Divisa, Observaciones (columna A vacía).
+
+    Reglas de negocio (compra de vivienda + hipoteca, julio 2026 — ver PROJECT.md):
+    - 'Cargo por intereses de prestamo' → Categoría 'Hipoteca', Tipo 'expense'.
+    - 'Adeudo de seguros' / 'Abono por disposicion de prestamo/credito' /
+      'Cargo por emision de cheque bancario' / 'Adeudo tecnicos en tasacion...'
+      → Categoría 'Compra vivienda', Tipo 'patrimonio' (fuera del cash flow).
+    - Cualquiera de los 4 conceptos de transferencia/traspaso cuya contraparte
+      sea una identidad propia conocida → Tipo 'internal'.
+    - Todo lo demás conserva su signo natural: expense/income.
+    """
+
+    _HEADER_LABELS = {'F.Valor', 'Fecha', 'Concepto', 'Movimiento', 'Importe', 'Observaciones'}
+
+    def parse(self, xlsx_path: str) -> list[Transaction]:
+        wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+        ws = wb['Informe BBVA'] if 'Informe BBVA' in wb.sheetnames else wb[wb.sheetnames[0]]
+
+        header_row, col_idx = self._find_header(ws)
+        if header_row is None:
+            return []
+
+        transactions = []
+        for row in ws.iter_rows(min_row=header_row + 1, values_only=False):
+            def get(col_name: str):
+                idx = col_idx.get(col_name)
+                return row[idx - 1].value if idx else None
+
+            fecha_raw = get('Fecha')
+            concepto = str(get('Concepto') or '').strip()
+            if not fecha_raw or not concepto:
+                continue
+
+            if isinstance(fecha_raw, datetime):
+                date = fecha_raw
+            else:
+                try:
+                    date = datetime.strptime(str(fecha_raw).strip(), '%d/%m/%Y')
+                except ValueError:
+                    continue
+
+            try:
+                importe = float(get('Importe'))
+            except (TypeError, ValueError):
+                continue
+
+            movimiento = str(get('Movimiento') or '').strip()
+            observaciones = str(get('Observaciones') or '').strip()
+
+            tx = self._classify(date, concepto, movimiento, importe, observaciones)
+            if tx:
+                transactions.append(tx)
+        return transactions
+
+    def _find_header(self, ws) -> tuple[Optional[int], dict[str, int]]:
+        max_scan_row = min(ws.max_row, 15)
+        for r in range(1, max_scan_row + 1):
+            found: dict[str, int] = {}
+            for c in range(1, ws.max_column + 1):
+                v = ws.cell(row=r, column=c).value
+                if isinstance(v, str) and v.strip() in self._HEADER_LABELS:
+                    found[v.strip()] = c
+            if {'Fecha', 'Concepto', 'Importe'}.issubset(found.keys()):
+                return r, found
+        return None, {}
+
+    def _classify(self, date: datetime, concepto: str, movimiento: str,
+                  importe: float, observaciones: str) -> Optional[Transaction]:
+        concepto_n = _norm_bbva(concepto)
+        amount = abs(importe)
+
+        if concepto_n == _BBVA_HIPOTECA_CONCEPT:
+            return Transaction(date=date, description=concepto, amount=amount,
+                               tx_type='expense', bank='BBVA', category='Hipoteca')
+
+        if concepto_n in _BBVA_VIVIENDA_CONCEPTS or concepto_n.startswith(_BBVA_VIVIENDA_TASACION_PREFIX):
+            return Transaction(date=date, description=concepto, amount=amount,
+                               tx_type='patrimonio', bank='BBVA', category='Compra vivienda')
+
+        contraparte = observaciones or movimiento
+        desc = f"{concepto} - {contraparte}" if contraparte else concepto
+
+        if concepto_n in _BBVA_TRANSFER_CONCEPTS and _is_bbva_known_counterparty(movimiento, observaciones):
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='internal', bank='BBVA')
+
+        if importe < 0:
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='expense', bank='BBVA')
+        return Transaction(date=date, description=desc, amount=amount,
+                           tx_type='income', bank='BBVA')
