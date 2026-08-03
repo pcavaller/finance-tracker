@@ -427,7 +427,7 @@ class SheetsClient:
     def get_vivienda_transactions(self) -> list[dict]:
         """Todas las filas de la vista Vivienda: Categoría en {'Compra vivienda', 'Hipoteca'}
         o Vivienda='Sí' (columna independiente de Tipo/Categoría, no afecta cash flow).
-        Ordenado cronológicamente ascendente."""
+        Ordenado cronológicamente descendente (más reciente primero)."""
         rows = self._get_all_records()
         result = []
         for r in rows:
@@ -456,5 +456,5 @@ class SheetsClient:
             except (ValueError, AttributeError):
                 return (0, 0, 0)
 
-        result.sort(key=_sort_key)
+        result.sort(key=_sort_key, reverse=True)
         return result
