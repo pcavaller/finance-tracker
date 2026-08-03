@@ -321,56 +321,6 @@
     </div>
 
     <!-- ══════════════════════════════════════════
-         VIEW: HISTORIAL
-    ══════════════════════════════════════════ -->
-    <div x-show="view === 'history'">
-      <div class="mt-6 flex items-center justify-between">
-        <h2 class="text-xl font-bold text-gray-900">Historial</h2>
-        <select x-model="historyMonth" @change="loadHistory()"
-          class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
-          <template x-for="m in availableMonths" :key="m">
-            <option :value="m" x-text="fmtMonthLabel(m)"></option>
-          </template>
-        </select>
-      </div>
-
-      <div x-show="histLoading" class="mt-8 text-center py-8">
-        <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
-      </div>
-
-      <div x-show="!histLoading && histGroups.length === 0" class="mt-8 text-center py-12 text-gray-400">
-        <p class="text-4xl mb-3">📋</p>
-        <p class="font-medium text-gray-500">Sin transacciones</p>
-      </div>
-
-      <template x-for="group in histGroups" :key="group.date">
-        <div class="mt-5">
-          <div class="flex items-center justify-between mb-2">
-            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide" x-text="group.date"></p>
-            <p class="text-xs text-gray-400" x-text="fmtAmount(group.total)"></p>
-          </div>
-          <template x-for="tx in group.txs" :key="tx.description + tx.date + tx.amount">
-            <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-2 flex items-center gap-3">
-              <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl shrink-0"
-                x-text="catEmoji(tx.category)"></div>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
-                <div class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap">
-                  <select x-html="categoryOptions(tx.category)"
-                    @change="updateCategory(tx, $event.target.value)"
-                    class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
-                  </select>
-                  <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
-                </div>
-              </div>
-              <span class="font-semibold text-gray-900 shrink-0" x-text="fmtAmount(tx.amount)"></span>
-            </div>
-          </template>
-        </div>
-      </template>
-    </div>
-
-    <!-- ══════════════════════════════════════════
          VIEW: PERSONAS
     ══════════════════════════════════════════ -->
     <div x-show="view === 'personas'">
@@ -453,36 +403,92 @@
           class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 pr-10">
         <span class="absolute right-3 top-3 text-gray-400 text-lg">🔍</span>
       </div>
-      <div x-show="searchLoading" class="mt-6 text-center py-8">
-        <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
-      </div>
-      <div x-show="!searchLoading && searchQuery.length >= 2 && searchResults.length === 0"
-        class="mt-8 text-center py-12 text-gray-400">
-        <p class="text-4xl mb-3">🔍</p>
-        <p class="font-medium text-gray-500">Sin resultados</p>
-      </div>
-      <div x-show="!searchLoading && searchResults.length > 0" class="mt-4">
-        <p class="text-xs text-gray-400 mb-3" x-text="searchResults.length + ' resultado' + (searchResults.length !== 1 ? 's' : '')"></p>
-        <template x-for="tx in searchResults" :key="tx.description + tx.date + tx.mes">
-          <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-2 flex items-center gap-3">
-            <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl shrink-0"
-              x-text="catEmoji(tx.category)"></div>
-            <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
-              <div class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap">
-                <span x-text="tx.date"></span>
-                <span>·</span>
-                <select x-html="categoryOptions(tx.category)"
-                  @change="updateCategory(tx, $event.target.value)"
-                  class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
-                </select>
-                <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
-              </div>
-            </div>
-            <span class="font-semibold text-gray-900 shrink-0" x-text="fmtAmount(tx.amount)"></span>
+
+      <!-- Modo búsqueda activa (2+ caracteres) -->
+      <template x-if="searchQuery.length >= 2">
+        <div>
+          <div x-show="searchLoading" class="mt-6 text-center py-8">
+            <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
           </div>
-        </template>
-      </div>
+          <div x-show="!searchLoading && searchResults.length === 0"
+            class="mt-8 text-center py-12 text-gray-400">
+            <p class="text-4xl mb-3">🔍</p>
+            <p class="font-medium text-gray-500">Sin resultados</p>
+          </div>
+          <div x-show="!searchLoading && searchResults.length > 0" class="mt-4">
+            <p class="text-xs text-gray-400 mb-3" x-text="searchResults.length + ' resultado' + (searchResults.length !== 1 ? 's' : '')"></p>
+            <template x-for="tx in searchResults" :key="tx.description + tx.date + tx.mes">
+              <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-2 flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl shrink-0"
+                  x-text="catEmoji(tx.category)"></div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
+                  <div class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap">
+                    <span x-text="tx.date"></span>
+                    <span>·</span>
+                    <select x-html="categoryOptions(tx.category)"
+                      @change="updateCategory(tx, $event.target.value)"
+                      class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
+                    </select>
+                    <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
+                  </div>
+                </div>
+                <span class="font-semibold text-gray-900 shrink-0" x-text="fmtAmount(tx.amount)"></span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <!-- Modo historial por defecto (sin búsqueda activa) -->
+      <template x-if="searchQuery.length < 2">
+        <div>
+          <div class="mt-6 flex items-center justify-between">
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Historial</p>
+            <select x-model="historyMonth" @change="loadHistory()"
+              class="text-sm border border-gray-200 rounded-xl px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              <template x-for="m in availableMonths" :key="m">
+                <option :value="m" x-text="fmtMonthLabel(m)"></option>
+              </template>
+            </select>
+          </div>
+
+          <div x-show="histLoading" class="mt-8 text-center py-8">
+            <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
+          </div>
+
+          <div x-show="!histLoading && histGroups.length === 0" class="mt-8 text-center py-12 text-gray-400">
+            <p class="text-4xl mb-3">📋</p>
+            <p class="font-medium text-gray-500">Sin transacciones</p>
+          </div>
+
+          <template x-for="group in histGroups" :key="group.date">
+            <div class="mt-5">
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide" x-text="group.date"></p>
+                <p class="text-xs text-gray-400" x-text="fmtAmount(group.total)"></p>
+              </div>
+              <template x-for="tx in group.txs" :key="tx.description + tx.date + tx.amount">
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-2 flex items-center gap-3">
+                  <div class="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-xl shrink-0"
+                    x-text="catEmoji(tx.category)"></div>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
+                    <div class="text-xs text-gray-400 mt-0.5 flex items-center gap-1 flex-wrap">
+                      <select x-html="categoryOptions(tx.category)"
+                        @change="updateCategory(tx, $event.target.value)"
+                        class="text-xs border border-gray-200 rounded px-1 py-0.5 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[150px]">
+                      </select>
+                      <span x-show="tx.titular"> · <span x-text="tx.titular"></span></span>
+                    </div>
+                  </div>
+                  <span class="font-semibold text-gray-900 shrink-0" x-text="fmtAmount(tx.amount)"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
     </div>
 
     <!-- ══════════════════════════════════════════
@@ -552,6 +558,201 @@
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════
+         VIEW: DASHBOARD GENERAL
+    ══════════════════════════════════════════ -->
+    <div x-show="view === 'general'">
+      <div class="mt-6">
+        <h2 class="text-xl font-bold text-gray-900">📊 Dashboard general</h2>
+        <p class="text-sm text-gray-500 mt-1">Panorama de los últimos 12 meses + estado de la compra de vivienda.</p>
+      </div>
+
+      <!-- Panorama 12m -->
+      <div x-show="panoramaLoading" class="mt-6 text-center py-6">
+        <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+      <div x-show="!panoramaLoading" class="mt-4 grid grid-cols-3 gap-2">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+          <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium">Ingresos 12m</p>
+          <p class="text-base font-bold text-green-600 mt-1" x-text="fmtAmount(panorama.ingresos)"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+          <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium">Gastos 12m</p>
+          <p class="text-base font-bold text-red-500 mt-1" x-text="fmtAmount(panorama.gastos)"></p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
+          <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium">Ahorro 12m</p>
+          <p class="text-base font-bold mt-1" :class="panorama.ahorro >= 0 ? 'text-indigo-600' : 'text-red-500'"
+            x-text="fmtAmount(panorama.ahorro)"></p>
+          <p class="text-[10px] text-gray-400 mt-0.5" x-text="Math.round((panorama.tasa_ahorro || 0) * 100) + '% tasa'"></p>
+        </div>
+      </div>
+
+      <!-- Vivienda -->
+      <div class="mt-8">
+        <h2 class="text-xl font-bold text-gray-900">🏡 Vivienda</h2>
+        <p class="text-sm text-gray-500 mt-1">Todo el dinero de la compra: préstamos, cheques, seguros, tasación e hipoteca. No afecta al cash flow mensual.</p>
+      </div>
+
+      <!-- Vivienda internal tabs -->
+      <div class="mt-4 flex bg-gray-100 rounded-xl p-1 gap-1">
+        <template x-for="t in [
+          {key: 'resumen', label: 'Resumen'},
+          {key: 'hipoteca', label: 'Hipoteca'},
+          {key: 'prestamo_padre', label: 'Préstamo padre'},
+          {key: 'cierre', label: 'Cierre'},
+        ]" :key="t.key">
+          <button @click="viviendaTab = t.key"
+            class="flex-1 text-xs font-semibold py-2 rounded-lg transition-colors"
+            :class="viviendaTab === t.key ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'"
+            x-text="t.label"></button>
+        </template>
+      </div>
+
+      <div x-show="viviendaLoading" class="mt-8 text-center py-8">
+        <div class="inline-block w-6 h-6 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+
+      <!-- Tab: Resumen -->
+      <div x-show="!viviendaLoading && viviendaTab === 'resumen'" class="mt-4 grid grid-cols-1 gap-3">
+        <div class="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-5 text-white shadow-lg">
+          <p class="text-indigo-200 text-sm font-medium">Total financiado</p>
+          <p class="text-3xl font-bold mt-1" x-text="'+' + fmtAmount(viviendaSummary.total_financiado)"></p>
+          <p class="text-indigo-200 text-xs mt-1">Hipoteca (425.317,96€, incluye seguro de vida) + préstamos padre de María (90.000€)</p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p class="text-xs text-gray-500 uppercase tracking-wide font-medium">Total pagado</p>
+            <p class="text-xl font-bold text-red-500 mt-1" x-text="'-' + fmtAmount(viviendaSummary.total_pagado)"></p>
+            <p class="text-xs text-gray-400 mt-1">Cheques, tasación, arras, seguro, intereses</p>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p class="text-xs text-gray-500 uppercase tracking-wide font-medium"
+              x-text="viviendaSummary.diferencia < 0 ? 'De vuestro bolsillo' : 'Margen sin usar'"></p>
+            <p class="text-xl font-bold mt-1"
+              :class="viviendaSummary.diferencia < 0 ? 'text-red-500' : 'text-green-600'"
+              x-text="(viviendaSummary.diferencia < 0 ? '-' : '+') + fmtAmount(Math.abs(viviendaSummary.diferencia))"></p>
+            <p class="text-xs text-gray-400 mt-1"
+              x-text="viviendaSummary.diferencia < 0 ? 'Financiado menos pagado — ya puesto antes de la gestoría' : 'Financiado aún no gastado del todo'"></p>
+          </div>
+        </div>
+        <div class="bg-amber-50 rounded-2xl border border-amber-100 p-4">
+          <p class="text-xs text-amber-700 uppercase tracking-wide font-medium">De los cuales, seguro de vida (Pablo + María)</p>
+          <p class="text-lg font-bold text-amber-700 mt-1" x-text="fmtAmount(viviendaSummary.seguro_vinculado)"></p>
+          <p class="text-xs text-amber-600 mt-1">Financiado por el banco dentro del préstamo — cuenta en el financiado y en el pagado de arriba, esto es solo el desglose.</p>
+        </div>
+      </div>
+
+      <!-- Tab: Hipoteca -->
+      <div x-show="!viviendaLoading && viviendaTab === 'hipoteca'" class="mt-4 grid grid-cols-1 gap-3">
+        <template x-for="p in viviendaPrestamos.filter(p => p.Entidad && p.Entidad.includes('Banco'))" :key="p.Concepto">
+          <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p class="text-sm font-semibold text-gray-800" x-text="p.Concepto"></p>
+            <p class="text-2xl font-bold text-indigo-600 mt-1" x-text="fmtAmount(p.Importe)"></p>
+            <p class="text-xs text-gray-400 mt-1" x-text="'Desembolso ' + p.Fecha"></p>
+            <p class="text-xs text-gray-500 mt-2" x-text="p.Nota"></p>
+          </div>
+        </template>
+
+        <!-- Amortización estimada (sistema francés, calculada con TIN/cuota/plazo reales) -->
+        <div x-show="viviendaAmortizacion" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">Amortización estimada</h3>
+          <p class="text-xs text-gray-400 mb-3"
+            x-text="'TIN ' + viviendaAmortizacion?.tin + '% · cuota ' + fmtAmount(viviendaAmortizacion?.cuota_mensual) + '/mes · ' + viviendaAmortizacion?.numero_cuotas + ' cuotas desde ' + viviendaAmortizacion?.fecha_primera_cuota"></p>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium">Capital pendiente</p>
+              <p class="text-lg font-bold text-indigo-600 mt-0.5" x-text="fmtAmount(viviendaAmortizacion?.capital_pendiente)"></p>
+            </div>
+            <div>
+              <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium">Intereses pagados (cuotas)</p>
+              <p class="text-lg font-bold text-red-500 mt-0.5" x-text="fmtAmount(viviendaAmortizacion?.interes_pagado_acumulado)"></p>
+            </div>
+          </div>
+          <div class="mt-3 pt-3 border-t border-gray-100 flex justify-between items-center text-xs text-gray-500">
+            <span x-text="viviendaAmortizacion?.cuotas_pagadas + ' de ' + viviendaAmortizacion?.numero_cuotas + ' cuotas'"></span>
+            <span x-text="'Total intereses a lo largo del préstamo: ' + fmtAmount(viviendaAmortizacion?.interes_total_vida_prestamo)"></span>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Cuotas / intereses cargados (reales)</h3>
+          <template x-for="tx in viviendaTxs.filter(t => t.category === 'Hipoteca')" :key="tx.description + tx.date + tx.amount">
+            <div class="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0 gap-3">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
+                <p class="text-xs text-gray-400 mt-0.5" x-text="tx.date"></p>
+              </div>
+              <span class="font-semibold shrink-0 text-red-500" x-text="'-' + fmtAmount(Math.abs(tx.amount))"></span>
+            </div>
+          </template>
+          <p x-show="viviendaTxs.filter(t => t.category === 'Hipoteca').length === 0" class="text-sm text-gray-400 text-center py-4">Sin cuotas cargadas todavía</p>
+        </div>
+      </div>
+
+      <!-- Tab: Préstamo padre -->
+      <div x-show="!viviendaLoading && viviendaTab === 'prestamo_padre'" class="mt-4 grid grid-cols-1 gap-3">
+        <template x-for="p in viviendaPrestamos.filter(p => p.Entidad === 'Padre de María')" :key="p.Concepto">
+          <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <p class="text-sm font-semibold text-gray-800" x-text="p.Concepto"></p>
+            <p class="text-xl font-bold text-indigo-600 mt-1" x-text="fmtAmount(p.Importe)"></p>
+            <p class="text-xs text-gray-400 mt-1" x-text="p.Fecha + ' · cuota ' + fmtAmount(p.Cuota_mensual) + '/mes desde ' + p.Fecha_inicio_cuota"></p>
+            <p class="text-xs text-gray-500 mt-1" x-text="p.Nota"></p>
+          </div>
+        </template>
+
+        <!-- Calendario de devolución -->
+        <div x-show="viviendaCalendario" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Calendario de devolución</h3>
+
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-9 h-9 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-sm font-bold shrink-0">⏳</div>
+            <div>
+              <p class="text-sm font-semibold text-gray-800"
+                x-text="viviendaCalendario?.estado === 'en_carencia' ? 'En carencia' : (viviendaCalendario?.estado === 'tramo1_activo' ? 'Tramo 1 activo (270€/mes)' : 'Tramo 1 + 2 activos (492€/mes)')"></p>
+              <p class="text-xs text-gray-400" x-show="viviendaCalendario?.estado === 'en_carencia'"
+                x-text="'Faltan ' + viviendaCalendario?.meses_restantes_carencia + ' meses (~' + viviendaCalendario?.anios_restantes_carencia + ' años) para empezar a pagar'"></p>
+            </div>
+          </div>
+
+          <div class="space-y-3 border-l-2 border-indigo-100 pl-4 ml-4">
+            <div class="relative">
+              <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-indigo-500"></div>
+              <p class="text-sm font-medium text-gray-800">Hito 1 — inicio tramo 1</p>
+              <p class="text-xs text-gray-400" x-text="viviendaCalendario?.hito1?.fecha + ' · cuota ' + fmtAmount(viviendaCalendario?.hito1?.cuota_mensual) + '/mes'"></p>
+            </div>
+            <div class="relative" x-show="viviendaCalendario?.hito2">
+              <div class="absolute -left-[21px] top-1 w-3 h-3 rounded-full bg-indigo-500"></div>
+              <p class="text-sm font-medium text-gray-800">Hito 2 — inicio tramo 2</p>
+              <p class="text-xs text-gray-400" x-text="viviendaCalendario?.hito2?.fecha + ' · cuota total ' + fmtAmount(viviendaCalendario?.hito2?.cuota_total) + '/mes'"></p>
+            </div>
+          </div>
+
+          <div class="flex justify-between items-center mt-4 pt-3 border-t border-gray-100">
+            <span class="text-xs text-gray-500 uppercase tracking-wide font-medium">Total a devolver</span>
+            <span class="text-sm font-bold text-gray-800" x-text="fmtAmount(viviendaCalendario?.total_a_devolver) + ' · sin intereses'"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Cierre -->
+      <div x-show="!viviendaLoading && viviendaTab === 'cierre'" class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Detalle cronológico</h3>
+        <template x-for="tx in viviendaTxs" :key="tx.description + tx.date + tx.amount">
+          <div class="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0 gap-3">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-gray-800 truncate" x-text="tx.description"></p>
+              <p class="text-xs text-gray-400 mt-0.5" x-text="tx.date + ' · ' + tx.category + (tx.titular ? ' · ' + tx.titular : '')"></p>
+            </div>
+            <span class="font-semibold shrink-0"
+              :class="tx.bucket === 'pagado' ? 'text-red-500' : (tx.bucket === 'seguro' ? 'text-amber-500' : 'text-green-600')"
+              x-text="(tx.bucket === 'pagado' ? '-' : '+') + fmtAmount(Math.abs(tx.amount))"></span>
+          </div>
+        </template>
+        <p x-show="viviendaTxs.length === 0" class="text-sm text-gray-400 text-center py-4">Sin movimientos de vivienda</p>
+      </div>
+    </div>
+
   </main>
 
   <!-- Bottom navigation -->
@@ -575,7 +776,7 @@
         </svg>
         <span class="text-[10px] font-medium">Subir</span>
       </button>
-      <button @click="view = 'search'; searchQuery = ''; searchResults = []"
+      <button @click="view = 'search'; searchQuery = ''; searchResults = []; if (!availableMonths.length) loadHistoryMonths(); else loadHistory()"
         class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'search' ? 'text-indigo-600' : 'text-gray-400'">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -593,15 +794,6 @@
         </svg>
         <span class="text-[10px] font-medium">Anual</span>
       </button>
-      <button @click="view = 'history'; loadHistoryMonths()"
-        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
-        :class="view === 'history' ? 'text-indigo-600' : 'text-gray-400'">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
-        <span class="text-[10px] font-medium">Historial</span>
-      </button>
       <button @click="view = 'personas'; if (!availableMonths.length) loadHistoryMonths().then(() => loadPersonas()); else loadPersonas()"
         class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
         :class="view === 'personas' ? 'text-indigo-600' : 'text-gray-400'">
@@ -610,6 +802,15 @@
             d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
         </svg>
         <span class="text-[10px] font-medium">Personas</span>
+      </button>
+      <button @click="view = 'general'; loadGeneral()"
+        class="bottom-nav-item flex-1 flex flex-col items-center py-2.5 gap-0.5"
+        :class="view === 'general' ? 'text-indigo-600' : 'text-gray-400'">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 0h6v6h-6v-6z"/>
+        </svg>
+        <span class="text-[10px] font-medium">General</span>
       </button>
     </div>
   </nav>
@@ -730,6 +931,19 @@ function app() {
     trendMonths: [],
     trendTotals: [],
     trendChart: null,
+
+    // Dashboard general (panorama 12m)
+    panorama: { ingresos: 0, gastos: 0, ahorro: 0, tasa_ahorro: 0 },
+    panoramaLoading: false,
+
+    // Vivienda (dentro de Dashboard general)
+    viviendaTab: 'resumen',
+    viviendaTxs: [],
+    viviendaSummary: { total_financiado: 0, total_pagado: 0, diferencia: 0, seguro_vinculado: 0 },
+    viviendaPrestamos: [],
+    viviendaCalendario: null,
+    viviendaAmortizacion: null,
+    viviendaLoading: false,
 
     categories: Object.keys(CATEGORY_EMOJIS),
     editingTxKey: null,
@@ -1143,6 +1357,44 @@ function app() {
       }
     },
 
+    // ── Dashboard general (panorama 12m + Vivienda) ─────────
+
+    async loadGeneral() {
+      await Promise.all([this.loadPanorama(), this.loadVivienda()]);
+    },
+
+    async loadPanorama() {
+      this.panoramaLoading = true;
+      try {
+        let url = '/api/panorama_12m';
+        if (this.activePerson) url += `?titular=${encodeURIComponent(this.activePerson)}`;
+        const r = await fetch(url);
+        const data = await r.json();
+        this.panorama = data || { ingresos: 0, gastos: 0, ahorro: 0, tasa_ahorro: 0 };
+      } catch (e) {
+        this.showToast('Error cargando panorama general', true);
+      } finally {
+        this.panoramaLoading = false;
+      }
+    },
+
+    async loadVivienda() {
+      this.viviendaLoading = true;
+      try {
+        const r = await fetch('/api/vivienda');
+        const data = await r.json();
+        this.viviendaTxs = data.transactions || [];
+        this.viviendaSummary = data.summary || { total_financiado: 0, total_pagado: 0, diferencia: 0, seguro_vinculado: 0 };
+        this.viviendaPrestamos = data.prestamos || [];
+        this.viviendaCalendario = data.calendario_padre || null;
+        this.viviendaAmortizacion = data.amortizacion_hipoteca || null;
+      } catch (e) {
+        this.showToast('Error cargando datos de vivienda', true);
+      } finally {
+        this.viviendaLoading = false;
+      }
+    },
+
     // ── Helpers ────────────────────────────────────────────
 
     fmtAmount(v) {
@@ -1179,7 +1431,7 @@ function app() {
         tx.category = newCat;
         this.showToast(`Movido a ${newCat}`);
         if (this.view === 'dashboard') await this.refreshDashboard();
-        else if (this.view === 'history') await this.loadHistory();
+        else if (this.view === 'search' && this.searchQuery.length < 2) await this.loadHistory();
       } catch {
         this.showToast('Error al cambiar categoría', true);
       }

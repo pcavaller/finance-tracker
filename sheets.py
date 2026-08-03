@@ -19,6 +19,26 @@ SCOPES = [
 
 HEADERS = ['Fecha', 'Descripción', 'Importe', 'Categoría', 'Banco', 'Titular', 'Mes', 'Tipo']
 
+PRESTAMOS_HEADERS = [
+    'Concepto', 'Importe', 'Fecha', 'Entidad', 'Años', 'Carencia_años',
+    'Cuota_mensual', 'Fecha_inicio_cuota', 'Nota',
+]
+
+_PRESTAMOS_SEED = [
+    [
+        'Préstamo hipotecario (neto)', 416000, '30/07/2026', 'Banco (BBVA)', '', '', '', '',
+        'Desembolso bruto 425.317,96€ menos 9.317,96€ de seguro de vida vinculado',
+    ],
+    [
+        'Préstamo padre — tramo 1 (arras)', 50000, '08/06/2026', 'Padre de María', 20, 5, 270, '06/2031',
+        'Sin intereses',
+    ],
+    [
+        'Préstamo padre — tramo 2 (cierre)', 40000, '16/07/2026', 'Padre de María', 20, 5, 222, '07/2031',
+        'Sin intereses, se suma a la cuota del tramo 1',
+    ],
+]
+
 
 def is_nomina(descripcion: str) -> bool:
     d = descripcion.upper()
@@ -41,8 +61,18 @@ class SheetsClient:
         self.ws_personas = self._get_or_create_sheet('Personas', ['Titular', 'Creado'])
         self.ws_reglas = self._get_or_create_sheet('Reglas', ['Keyword', 'Categoría', 'Tipo'])
         self._ensure_header(self.ws_reglas, 'Tipo')
+        self._ensure_header(self.ws, 'Vivienda')
+        self.ws_prestamos = self._get_or_create_sheet('Prestamos', PRESTAMOS_HEADERS)
+        self._seed_prestamos()
         self._cache_data: list[dict] = []
         self._cache_ts: float = 0.0
+
+    def _seed_prestamos(self) -> None:
+        """Puebla la hoja Prestamos con los 3 préstamos conocidos de la compra de
+        vivienda si aún está vacía (solo cabecera). No-op si ya tiene datos."""
+        values = self.ws_prestamos.get_all_values()
+        if len(values) <= 1:
+            self.ws_prestamos.append_rows(_PRESTAMOS_SEED)
 
     _CACHE_TTL: float = 60.0
 
@@ -305,3 +335,126 @@ class SheetsClient:
                 self._invalidate_cache()
                 return True
         return False
+
+    def mark_vivienda(self, fecha: str, descripcion: str, amount: float, banco: str) -> bool:
+        """Marca Vivienda='Sí' en una fila localizada por (fecha, descripcion, abs(importe), banco),
+        sin tocar Tipo ni Categoría. Mismo patrón de matching que update_transaction_category —
+        pensado para filas históricas que deben conservar su Tipo/Categoría actual."""
+        values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')
+        if not values:
+            return False
+        headers = values[0]
+        try:
+            fecha_col = headers.index('Fecha')
+            desc_col = headers.index('Descripción')
+            importe_col = headers.index('Importe')
+            banco_col = headers.index('Banco')
+            vivienda_col = headers.index('Vivienda') + 1  # 1-indexed for update_cell
+        except ValueError:
+            return False
+        target_amount = round(abs(amount), 2)
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) <= max(fecha_col, desc_col, importe_col, banco_col):
+                continue
+            try:
+                row_amount = round(abs(float(str(row[importe_col]).replace(',', '.'))), 2)
+            except ValueError:
+                continue
+            if (row[fecha_col] == fecha and
+                    row[desc_col] == descripcion and
+                    row_amount == target_amount and
+                    row[banco_col] == banco):
+                self.ws.update_cell(i, vivienda_col, 'Sí')
+                self._invalidate_cache()
+                return True
+        return False
+
+    def mark_vivienda_by_category(self, categories: list[str]) -> list[dict]:
+        """Marca Vivienda='Sí' en todas las filas cuya Categoría esté en `categories`
+        y que aún no tengan la marca. Devuelve las filas marcadas (fecha, descripcion,
+        importe, banco) para poder verificarlas."""
+        values = self.ws.get_all_values(value_render_option='UNFORMATTED_VALUE')
+        if not values:
+            return []
+        headers = values[0]
+        try:
+            fecha_col = headers.index('Fecha')
+            desc_col = headers.index('Descripción')
+            importe_col = headers.index('Importe')
+            banco_col = headers.index('Banco')
+            cat_col = headers.index('Categoría')
+            vivienda_col = headers.index('Vivienda') + 1  # 1-indexed for update_cell
+        except ValueError:
+            return []
+        marked = []
+        for i, row in enumerate(values[1:], start=2):
+            if len(row) <= cat_col or row[cat_col] not in categories:
+                continue
+            current = row[vivienda_col - 1] if len(row) > vivienda_col - 1 else ''
+            if current == 'Sí':
+                continue
+            self.ws.update_cell(i, vivienda_col, 'Sí')
+            marked.append({
+                'fecha': row[fecha_col] if len(row) > fecha_col else '',
+                'descripcion': row[desc_col] if len(row) > desc_col else '',
+                'importe': row[importe_col] if len(row) > importe_col else '',
+                'banco': row[banco_col] if len(row) > banco_col else '',
+            })
+        if marked:
+            self._invalidate_cache()
+        return marked
+
+    def get_prestamos(self) -> list[dict]:
+        """Todas las filas de la hoja Prestamos (financiación de la compra de vivienda:
+        hipoteca + préstamos familiares). Fuente única de `total_financiado` — nunca se
+        calcula sumando transacciones."""
+        values = self.ws_prestamos.get_all_values(value_render_option='UNFORMATTED_VALUE')
+        if not values:
+            return []
+        headers = values[0]
+        return [dict(zip(headers, row)) for row in values[1:] if row and row[0]]
+
+    def get_total_financiado(self) -> float:
+        """Suma del campo Importe de todas las filas de la hoja Prestamos."""
+        total = 0.0
+        for r in self.get_prestamos():
+            try:
+                total += float(str(r.get('Importe', 0) or 0).replace(',', '.'))
+            except (ValueError, TypeError):
+                continue
+        return total
+
+    def get_vivienda_transactions(self) -> list[dict]:
+        """Todas las filas de la vista Vivienda: Categoría en {'Compra vivienda', 'Hipoteca'}
+        o Vivienda='Sí' (columna independiente de Tipo/Categoría, no afecta cash flow).
+        Ordenado cronológicamente ascendente."""
+        rows = self._get_all_records()
+        result = []
+        for r in rows:
+            cat = r.get('Categoría', '')
+            if cat not in ('Compra vivienda', 'Hipoteca') and r.get('Vivienda', '') != 'Sí':
+                continue
+            raw = str(r.get('Importe', '0')).replace(',', '.')
+            try:
+                amount = float(raw)
+            except ValueError:
+                amount = 0.0
+            result.append({
+                'date': r.get('Fecha', ''),
+                'description': r.get('Descripción', ''),
+                'category': cat or 'Otros',
+                'amount': amount,
+                'bank': r.get('Banco', ''),
+                'titular': r.get('Titular', ''),
+                'tipo': r.get('Tipo', ''),
+            })
+
+        def _sort_key(item: dict) -> tuple[int, int, int]:
+            try:
+                d, m, y = item['date'].split('/')
+                return (int(y), int(m), int(d))
+            except (ValueError, AttributeError):
+                return (0, 0, 0)
+
+        result.sort(key=_sort_key)
+        return result
