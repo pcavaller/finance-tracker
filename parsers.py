@@ -292,17 +292,15 @@ def _detect_bank_from_pdf(pdf_path: str) -> str:
 class TradeRepublicParser:
     """
     Parse Trade Republic PDFs using word coordinates.
-    Column layout (approximate x0 boundaries):
-      FECHA: x < 100 | TIPO: 100–149 | DESC: 149–415
-      ENTRADA: 415–453 | SALIDA: 453–483 | BALANCE: ≥483
+    FECHA/TIPO (x < 149) is split by content (day/month/year vs text); DESC vs
+    money columns (x >= 149) is split by whether the token looks like an amount.
+    The ENTRADA/SALIDA/BALANCE x-offsets themselves drift between PDF exports, so
+    money tokens are ordered by position instead: rightmost = balance, next = amount.
     """
 
     # x0 column boundaries (from actual PDF word positions)
     X_TIPO = 100
-    X_DESC = 149
-    X_ENTRADA = 415
-    X_SALIDA = 450   # card expenses appear at x0=452.5
-    X_BALANCE = 480  # balance appears at x0=483.5
+    X_DESC = 135  # tipo continuation words (e.g. "tarjeta") max out ~117; desc starts ~148
 
     def parse(self, pdf_path: str) -> list[Transaction]:
         in_section = False
@@ -380,25 +378,35 @@ class TradeRepublicParser:
         lines.append(sorted(current, key=lambda x: x['x0']))
         return lines
 
+    _MONEY_RE = re.compile(r'^-?€?[\d.]+,\d{2}€?$')
+
     def _parse_block(self, words: list[dict], prev_balance: Optional[float] = None) -> tuple[Optional[Transaction], Optional[float]]:
-        """Parse a transaction from its collected words. Returns (transaction, balance_after)."""
-        fecha_words, tipo_words, desc_words, entrada_words, salida_words, balance_words = [], [], [], [], [], []
+        """Parse a transaction from its collected words. Returns (transaction, balance_after).
+
+        The ENTRADA/SALIDA/BALANCE columns are left-aligned at x-offsets that drift a
+        few px between PDF exports (and the balance's leading '€' occasionally glues to
+        the digits, shifting its x0 left). Rather than trust fixed column boundaries,
+        every money-shaped token past X_DESC is collected and sorted by position: the
+        rightmost one is always the running balance, the one before it (if any) is the
+        transaction amount. Direction (income/expense) is then derived from the row's
+        tipo/description text instead of which column the amount happened to render in.
+        """
+        fecha_words, tipo_words, desc_words, money = [], [], [], []
 
         for w in words:
             x = w['x0']
             t = w['text']
-            if x < self.X_TIPO:
-                fecha_words.append(t)
-            elif x < self.X_DESC:
-                tipo_words.append(t)
-            elif x < self.X_ENTRADA:
+            if x < self.X_DESC:
+                # FECHA/TIPO boundary drifts a few px between PDF exports;
+                # classify by content (day/month/year token) instead of x0.
+                if re.match(r'^\d{1,2}$', t) or re.match(r'^\d{4}$', t) or t.lower() in MONTH_ES:
+                    fecha_words.append(t)
+                else:
+                    tipo_words.append(t)
+            elif self._MONEY_RE.match(t):
+                money.append((x, t))
+            elif t != '€':
                 desc_words.append(t)
-            elif x < self.X_SALIDA:
-                entrada_words.append(t)
-            elif x < self.X_BALANCE:
-                salida_words.append(t)
-            else:
-                balance_words.append(t)
 
         date = _parse_date_es(' '.join(fecha_words))
         if not date:
@@ -406,71 +414,62 @@ class TradeRepublicParser:
 
         tipo = ' '.join(tipo_words).strip()
         desc = _clean_tr_desc(' '.join(desc_words))
-        entrada = _parse_amount(entrada_words[0]) if entrada_words else None
-        salida = _parse_amount(salida_words[0]) if salida_words else None
-        # Only keep numeric tokens (ignore "EUR" currency labels)
-        balance_numeric = [t for t in balance_words if re.search(r'\d', t)]
-        current_balance = _parse_amount(' '.join(balance_numeric[:1]))
+        money.sort(key=lambda m: m[0])
+        current_balance = _parse_amount(money[-1][1]) if money else None
+        amount = _parse_amount(money[-2][1]) if len(money) >= 2 else None
 
-        # Interest / bonuses / dividends → income
+        # Interest / bonuses / dividends → investment return, not received income
         if any(k in tipo for k in ('Interés', 'Bonificación', 'Rentabilidad')):
-            # amount may land in desc column due to layout variance; extract it from desc tail
-            if not entrada and desc:
-                m = re.search(r'([\d.,]+)\s*$', desc)
-                if m:
-                    entrada = _parse_amount(m.group(1))
-                    desc = desc[:m.start()].strip()
-            if entrada:
-                return Transaction(date=date, description=desc or tipo, amount=entrada,
-                                   tx_type='income', bank='Trade Republic'), current_balance
+            if amount:
+                return Transaction(date=date, description=desc or tipo, amount=amount,
+                                   tx_type='investment', bank='Trade Republic'), current_balance
             return None, current_balance
 
         # Investment operations
         if 'Operar' in tipo:
-            amount = salida or entrada or 0
-            return Transaction(date=date, description=desc, amount=amount,
+            return Transaction(date=date, description=desc, amount=amount or 0,
                                tx_type='investment', bank='Trade Republic'), current_balance
 
         # Transfers
         if 'Transferencia' in tipo:
-            amount = salida or entrada or 0
+            if not amount:
+                return None, current_balance
             if _is_internal(desc):
                 return Transaction(date=date, description=desc, amount=amount,
                                    tx_type='internal', bank='Trade Republic'), current_balance
-            if salida:
-                return Transaction(date=date, description=desc, amount=salida,
+            if 'Outgoing' in desc:
+                return Transaction(date=date, description=desc, amount=amount,
                                    tx_type='expense', bank='Trade Republic'), current_balance
-            if entrada:
-                return Transaction(date=date, description=desc, amount=entrada,
+            if 'Incoming' in desc:
+                return Transaction(date=date, description=desc, amount=amount,
                                    tx_type='income', bank='Trade Republic'), current_balance
-            return None, current_balance
+            # No direction keyword found → fall back to balance movement
+            if prev_balance is not None and current_balance is not None and current_balance < prev_balance:
+                return Transaction(date=date, description=desc, amount=amount,
+                                   tx_type='expense', bank='Trade Republic'), current_balance
+            return Transaction(date=date, description=desc, amount=amount,
+                               tx_type='income', bank='Trade Republic'), current_balance
 
         # Card transactions
         if 'tarjeta' in tipo or 'Transacción' in tipo:
-            if salida:
-                return Transaction(date=date, description=desc, amount=salida,
-                                   tx_type='expense', bank='Trade Republic'), current_balance
-            if entrada:
-                # New PDF format: amounts appear in ENTRADA column for both expenses and refunds.
-                # Use balance direction to distinguish: balance drop → expense, balance rise → refund.
+            if amount:
+                # Use balance direction to distinguish expense from refund.
                 if prev_balance is not None and current_balance is not None:
                     if current_balance < prev_balance:
-                        return Transaction(date=date, description=desc, amount=entrada,
+                        return Transaction(date=date, description=desc, amount=amount,
                                            tx_type='expense', bank='Trade Republic'), current_balance
                     else:
                         return Transaction(date=date, description=f'[Devolución] {desc}',
-                                           amount=entrada, tx_type='income', bank='Trade Republic'), current_balance
+                                           amount=amount, tx_type='income', bank='Trade Republic'), current_balance
                 # Fallback: no balance data → assume expense (card transactions are usually expenses)
-                return Transaction(date=date, description=desc, amount=entrada,
+                return Transaction(date=date, description=desc, amount=amount,
                                    tx_type='expense', bank='Trade Republic'), current_balance
+            return None, current_balance
 
-        # Unrecognized tipo: if there's an outgoing amount, treat as expense rather than drop silently
-        if salida:
-            return Transaction(date=date, description=desc or tipo, amount=salida,
+        # Unrecognized tipo: if there's an amount, treat as expense rather than drop silently
+        if amount:
+            return Transaction(date=date, description=desc or tipo, amount=amount,
                                tx_type='expense', bank='Trade Republic'), current_balance
-        if entrada:
-            return Transaction(date=date, description=desc or tipo, amount=entrada,
-                               tx_type='income', bank='Trade Republic'), current_balance
         return None, current_balance
 
 
@@ -740,9 +739,12 @@ class OpenbankCuentasPDFParser:
                     i += 1
                     continue
 
-                # Collect post-desc: next line if it's not a data line and not noise
+                # Collect post-desc: next line if it's not a data line and not noise.
+                # Only when inline_desc is empty — a data line that already carries its
+                # own description never legitimately has a continuation line; grabbing
+                # one anyway steals the next transaction's pre-desc line instead.
                 post_parts: list[str] = []
-                if i + 1 < len(raw_lines):
+                if not inline_desc.strip() and i + 1 < len(raw_lines):
                     next_line = raw_lines[i + 1]
                     if not self._DATA_LINE_RE.match(next_line) and not self._NOISE_RE.match(next_line):
                         if not self._POSTDESC_SKIP_RE.match(next_line):
@@ -773,6 +775,44 @@ class OpenbankCuentasPDFParser:
         return _classify_openbank(date, description, amount)
 
 
+# ── Openbank Tarjeta PDF Parser ────────────────────────────────────────────────
+
+class OpenbankTarjetaPDFParser:
+    """
+    Parse Openbank card-movements PDFs ('Tarjetas - Movimientos'), distinct from
+    account statements: ISO dates, dot-decimal amounts, descriptions truncated
+    to a fixed width by the export.
+
+    Line format: "YYYY-MM-DD HH:MM <concepto> Liquidado -X.XX EUR"
+    Sidebar at x < 50 pollutes extract_text() same as OpenbankCuentasPDFParser.
+    """
+
+    _LINE_RE = re.compile(
+        r'^(\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}\s+(.+?)\s+Liquidado\s+(-?\d+(?:\.\d+)?)\s*EUR$'
+    )
+
+    def parse(self, pdf_path: str) -> list[Transaction]:
+        transactions = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                cropped = page.crop((50, 0, page.width, page.height))
+                text = cropped.extract_text() or ''
+                for line in text.splitlines():
+                    m = self._LINE_RE.match(line.strip())
+                    if not m:
+                        continue
+                    date_str, concepto, amount_str = m.groups()
+                    try:
+                        date = datetime.strptime(date_str, '%Y-%m-%d')
+                        amount = float(amount_str)
+                    except ValueError:
+                        continue
+                    tx = _classify_openbank(date, concepto.strip(), amount)
+                    if tx:
+                        transactions.append(tx)
+        return transactions
+
+
 # ── Santander PDF Parser ───────────────────────────────────────────────────────
 
 class SantanderPDFParser:
@@ -792,8 +832,10 @@ class SantanderPDFParser:
         r'^(\d{1,2})\s+(ene|feb|mar|abr|may|jun|jul|ago|sept?|oct|nov|dic)\s+(\d{4})\s+(.+)',
         re.IGNORECASE,
     )
-    # Regex to find amounts at end of line: one or two "X.XXX,XX€" tokens
-    _AMOUNTS_RE = re.compile(r'(-?\d{1,3}(?:\.\d{3})*,\d{2})€')
+    # Regex to find amounts at end of line: one or two "X.XXX,XX€" tokens.
+    # Some Santander exports use the Unicode minus sign (−, U+2212) instead of
+    # a plain hyphen, which would otherwise flip outgoing amounts to positive.
+    _AMOUNTS_RE = re.compile(r'([-−]?\d{1,3}(?:\.\d{3})*,\d{2})€')
     # Value date line
     _FVALOR_RE = re.compile(r'^F\.\s*valor:', re.IGNORECASE)
     # Header / noise lines to skip
@@ -878,7 +920,7 @@ class SantanderPDFParser:
 
         # Parse importe (second-to-last or only amount)
         importe_str = amounts[-2] if len(amounts) >= 2 else amounts[-1]
-        raw = importe_str.replace('.', '').replace(',', '.')
+        raw = importe_str.replace('.', '').replace(',', '.').replace('−', '-')
         try:
             amount_val = float(raw)
         except ValueError:
