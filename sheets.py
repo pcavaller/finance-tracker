@@ -45,6 +45,24 @@ def is_nomina(descripcion: str) -> bool:
     return 'NOMINA' in d or 'NÓMINA' in d
 
 
+_RENTA_TRABAJO_KEYWORDS = ('STRIPE', 'BUENCOCO', 'HOSPITAL SANT JOAN', 'SAMARANCH GALLART')
+
+
+def is_renta_trabajo(descripcion: str) -> bool:
+    """Ingreso real de trabajo (nómina o negocio propio) para el Dashboard general —
+    distinto de 'ingreso compensatorio' (is_nomina invertido + banco != Santander),
+    que es un concepto ya usado en /api/summary y /api/annual con otro propósito.
+    Confirmado con Pablo 2026-08-03: Nómina DiverInvest (Pablo) + Stripe/Buencoco
+    (consulta de María) + Hospital Sant Joan de Déu (nómina hospital de María) +
+    Datafono Samaranch Gallart (ingreso de María). Todo lo demás que aparece como
+    Tipo=income (Bizums, dinero de familia, devoluciones/cashback, transferencias
+    entre cuentas propias con nombre distinto) queda fuera — no es renta de trabajo."""
+    if is_nomina(descripcion):
+        return True
+    d = descripcion.upper()
+    return any(kw in d for kw in _RENTA_TRABAJO_KEYWORDS)
+
+
 class SheetsClient:
 
     def __init__(self, credentials_path: str = None, sheet_id: str = None):
@@ -155,7 +173,12 @@ class SheetsClient:
             self._invalidate_cache()
         return saved
 
-    def get_monthly_summary(self, year: int, month: int, titular: str = None) -> dict:
+    def get_monthly_summary(self, year: int, month: int, titular: str = None, real_income: bool = False) -> dict:
+        """Por defecto calcula 'ingresos compensatorios' (excluye nómina y Banco=Santander,
+        usado por /api/summary y /api/annual para mostrar solo ingresos puntuales no-salariales).
+        Con real_income=True cuenta solo renta de trabajo real (ver is_renta_trabajo) —
+        usado por /api/panorama_12m, que necesita nómina + negocio de María, no el
+        compensatorio ni el resto de ruido (Bizums, familia, devoluciones...)."""
         month_str = f"{year:04d}-{month:02d}"
         all_rows = self._get_all_records()
         summary: dict[str, float] = {}
@@ -176,8 +199,11 @@ class SheetsClient:
             if tipo == 'expense':
                 summary[cat] = summary.get(cat, 0.0) + amount
                 total_expenses += amount
-            elif tipo == 'income' and row.get('Banco', '') != 'Santander':
-                if not is_nomina(row.get('Descripción', '')):
+            elif tipo == 'income':
+                desc = row.get('Descripción', '')
+                is_compensatorio = row.get('Banco', '') != 'Santander' and not is_nomina(desc)
+                counts = is_renta_trabajo(desc) if real_income else is_compensatorio
+                if counts:
                     summary['__income__'] = summary.get('__income__', 0.0) + amount
                     total_income += amount
         summary['__total__'] = total_expenses - total_income

@@ -67,11 +67,14 @@ api = APIRouter(prefix="/api", dependencies=[Depends(require_telegram_user)])
 
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
+    """Sin esto, el WebView nativo de Telegram móvil (iOS/Android) cachea agresivamente
+    index.html/JS/CSS al no llevar Cache-Control explícito (Telegram Desktop no mostraba
+    el problema porque revalida solo) — quedaba con una versión vieja de la Mini App
+    hasta cerrar y reabrir la app de Telegram entera."""
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith('/api/'):
-            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            response.headers['Pragma'] = 'no-cache'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
         return response
 
 app.add_middleware(NoCacheMiddleware)
@@ -538,13 +541,15 @@ async def get_vivienda():
 async def get_panorama_12m(titular: str = None):
     """Ingresos/Gastos/Ahorro agregados de los últimos 12 meses. Reutiliza
     sheets.get_monthly_summary (misma función que /api/summary) mes a mes y suma —
-    no duplica lógica de cálculo, solo cambia la ventana de 1 mes a 12."""
+    no duplica lógica de cálculo, solo cambia la ventana de 1 mes a 12.
+    real_income=True: aquí Ingresos = nómina + rentas del trabajo (ingreso real),
+    a diferencia de /api/summary que muestra el ingreso 'compensatorio' (sin nómina/Santander)."""
     now = datetime.now()
     total_income = 0.0
     total_expenses = 0.0
     y, m = now.year, now.month
     for _ in range(12):
-        s = sheets.get_monthly_summary(y, m, titular=titular or None)
+        s = sheets.get_monthly_summary(y, m, titular=titular or None, real_income=True)
         income = s.get('__income__', 0.0)
         net = s.get('__total__', 0.0)  # expenses - income, per get_monthly_summary
         total_income += income
