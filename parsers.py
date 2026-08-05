@@ -87,6 +87,8 @@ OWN_ACCOUNT_KEYWORDS = [
     'PABLO SABADELL',
     'MAR A ROSALIA',             # María's Revolut/own account alias
     'RUISANCHEZ GONZALEZ',       # María's specific surname combo (internal transfers)
+    'SANTANDER MERI',            # María's own Santander account (alias "Meri")
+    'BBVA MERI',                 # María's own BBVA-side alias (same as en parsers BBVA)
 ]
 
 
