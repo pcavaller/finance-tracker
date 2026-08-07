@@ -25,7 +25,7 @@ Credenciales en `.env`. Usar siempre `UNFORMATTED_VALUE` para leer números.
 
 ## Convenciones
 
-- Nómina DiverInvest excluida del cálculo de ingresos compensatorios
+- Toda renta de trabajo (nómina DiverInvest de Pablo + Stripe/Buencoco/Hospital Sant Joan de Déu/Samaranch Gallart de María) excluida del cálculo de ingresos compensatorios — ver `is_renta_trabajo` en sheets.py
 - Parking fusionado en categoría "Coche" (no existe como categoría separada)
 - Trade Republic: Interest payment / Cash Dividend / Cash reward allocation → `investment`, nunca `income`. Son rendimiento de inversión, no ingreso líquido recibido (implementado en `TradeRepublicParser._parse_block`, parsers.py)
 - Deploy en Render — `render.yaml` define el servicio

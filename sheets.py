@@ -49,9 +49,11 @@ _RENTA_TRABAJO_KEYWORDS = ('STRIPE', 'BUENCOCO', 'HOSPITAL SANT JOAN', 'SAMARANC
 
 
 def is_renta_trabajo(descripcion: str) -> bool:
-    """Ingreso real de trabajo (nómina o negocio propio) para el Dashboard general —
-    distinto de 'ingreso compensatorio' (is_nomina invertido + banco != Santander),
-    que es un concepto ya usado en /api/summary y /api/annual con otro propósito.
+    """Ingreso real de trabajo (nómina o negocio propio). Usado tanto por el
+    Dashboard general (ver real_income en get_monthly_summary) como para excluir
+    salario de 'ingresos compensatorios' en /api/summary y /api/annual — confirmado
+    con Pablo 2026-08-07 que toda esta lista es sueldo/negocio recurrente, no
+    ingreso puntual, así que debe quedar fuera de ambos cálculos por igual.
     Confirmado con Pablo 2026-08-03: Nómina DiverInvest (Pablo) + Stripe/Buencoco
     (consulta de María) + Hospital Sant Joan de Déu (nómina hospital de María) +
     Datafono Samaranch Gallart (ingreso de María). Todo lo demás que aparece como
@@ -174,11 +176,12 @@ class SheetsClient:
         return saved
 
     def get_monthly_summary(self, year: int, month: int, titular: str = None, real_income: bool = False) -> dict:
-        """Por defecto calcula 'ingresos compensatorios' (excluye nómina y Banco=Santander,
-        usado por /api/summary y /api/annual para mostrar solo ingresos puntuales no-salariales).
-        Con real_income=True cuenta solo renta de trabajo real (ver is_renta_trabajo) —
-        usado por /api/panorama_12m, que necesita nómina + negocio de María, no el
-        compensatorio ni el resto de ruido (Bizums, familia, devoluciones...)."""
+        """Por defecto calcula 'ingresos compensatorios' (excluye renta de trabajo —
+        ver is_renta_trabajo — y Banco=Santander; usado por /api/summary y /api/annual
+        para mostrar solo ingresos puntuales no-salariales). Con real_income=True
+        cuenta solo renta de trabajo real — usado por /api/panorama_12m, que necesita
+        nómina + negocio de María, no el compensatorio ni el resto de ruido (Bizums,
+        familia, devoluciones...)."""
         month_str = f"{year:04d}-{month:02d}"
         all_rows = self._get_all_records()
         summary: dict[str, float] = {}
@@ -201,7 +204,7 @@ class SheetsClient:
                 total_expenses += amount
             elif tipo == 'income':
                 desc = row.get('Descripción', '')
-                is_compensatorio = row.get('Banco', '') != 'Santander' and not is_nomina(desc)
+                is_compensatorio = row.get('Banco', '') != 'Santander' and not is_renta_trabajo(desc)
                 counts = is_renta_trabajo(desc) if real_income else is_compensatorio
                 if counts:
                     summary['__income__'] = summary.get('__income__', 0.0) + amount

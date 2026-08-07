@@ -40,7 +40,7 @@ Funcional. Bot lee PDFs de TR/Openbank/Revolut y xlsx de BBVA, clasifica, guarda
 
 ## Reglas operativas
 
-- Nómina DiverInvest excluida del cálculo de ingresos compensatorios
+- Toda renta de trabajo excluida del cálculo de ingresos compensatorios: nómina DiverInvest (Pablo) + Stripe/Buencoco/Hospital Sant Joan de Déu/datáfono Samaranch Gallart (María). Antes solo se excluía la nómina literal; ampliado 2026-08-07 a petición de Pablo tras confirmar que el datáfono de Samaranch Gallart también es sueldo recurrente, no ingreso puntual. Ver `is_renta_trabajo` en sheets.py.
 - Parking fusionado en Coche (categoría eliminada)
 - Santander (María Ruisánchez): todo income → `income` excluido del tracking de gastos; todo outgoing → `internal` (nunca `expense`). Implementado en `SantanderPDFParser._parse_block` (parsers.py).
 - Trade Republic: Interest payment / Cash Dividend / Cash reward allocation → `investment`, nunca `income` (son rendimiento de inversión, no ingreso líquido). Implementado en `TradeRepublicParser._parse_block` (parsers.py). Fix aplicado retroactivamente a filas históricas (2026-07-10).
