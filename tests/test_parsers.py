@@ -56,16 +56,10 @@ class TestTradeRepublicParser:
         cls.txs = TradeRepublicParser().parse(str(TR_PDF))
 
     def test_parses_expected_transaction_count(self):
-        assert len(self.txs) == 174
+        assert len(self.txs) == 177
 
     def test_no_contaminated_descriptions(self):
-        # El pie de página legal ("Sucursal en España...") se cuela en algunas
-        # descripciones cerca del fin de página (ver test xfail más abajo) —
-        # eso es un bug distinto al que este test vigila (bloques de dos
-        # transacciones fusionados en una descripción), así que se descarta
-        # aquí para no enmascarar ninguno de los dos.
-        cleaned = [d.split("Sucursal en España")[0] for d in (t.description for t in self.txs)]
-        assert max((len(d) for d in cleaned), default=0) < MAX_SANE_DESCRIPTION_LENGTH
+        assert max((len(t.description) for t in self.txs), default=0) < MAX_SANE_DESCRIPTION_LENGTH
 
     def test_dates_and_amounts_valid(self):
         for t in self.txs:
@@ -75,13 +69,11 @@ class TestTradeRepublicParser:
     def test_no_trailing_null_in_description(self):
         assert not any(t.description.strip().lower().endswith("null") for t in self.txs)
 
-    @pytest.mark.xfail(
-        reason="Bug conocido sin arreglar: el pie de página legal se cuela en "
-        "descripciones de Buy/Sell/Savings plan cerca del fin de página "
-        "(descubierto 2026-07-04, fuera del alcance del refactor actual).",
-        strict=True,
-    )
     def test_no_footer_boilerplate_leaking_into_description(self):
+        # Arreglado 2026-08-07: el filtro de pie de página cortaba a 60px del
+        # borde inferior, pero el bloque de datos de la empresa empieza a
+        # ~82.7px y se colaba en la última transacción de cada página (ver
+        # parse()). Ahora el margen es 90px.
         leaked = [t for t in self.txs if "Sucursal en España" in t.description]
         assert not leaked
 

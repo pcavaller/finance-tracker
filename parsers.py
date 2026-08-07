@@ -313,8 +313,15 @@ class TradeRepublicParser:
             for page in pdf.pages:
                 words = page.extract_words()
                 h = page.height
-                # Filter header (~130px) and footer (~60px from bottom)
-                filtered = [w for w in words if w['top'] > 130 and w['top'] < h - 60]
+                # Filter header (~130px) and footer. The repeated company-info
+                # footer box starts at a fixed ~82.7px from the bottom on every
+                # page (checked across multiple statements); the last real
+                # table row never lands closer than ~60px above that, so a 90px
+                # margin excludes the footer without ever touching real rows —
+                # the old 60px margin cut through the middle of the footer box
+                # and let its tail bleed into the last transaction as a false
+                # "continuation" line (bug tracked by the xfail test below).
+                filtered = [w for w in words if w['top'] > 130 and w['top'] < h - 90]
                 lines = self._group_lines(filtered, tolerance=6)
 
                 for line in lines:
@@ -347,6 +354,15 @@ class TradeRepublicParser:
                         current_block = list(line)
                     else:
                         current_block.extend(line)
+
+                # A transaction row never spans two pages in this layout; flush
+                # here so stray header/footer boilerplate from the top of the
+                # next page (which slips past the top>130 filter on pages where
+                # the repeated letterhead is taller) can't bleed into the last
+                # transaction's description as a false "continuation" line.
+                if current_block:
+                    tx_blocks.append(current_block)
+                    current_block = []
 
         if current_block:
             tx_blocks.append(current_block)
