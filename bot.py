@@ -26,7 +26,7 @@ from parsers import (
     RevolutPDFParser, SantanderPDFParser, BBVAParser,
 )
 from classifier import classify_batch, classify_cash_text, load_custom_rules, apply_type_overrides, apply_exclusions
-from sheets import SheetsClient, is_nomina
+from sheets import SheetsClient, is_renta_trabajo
 
 import re as _re
 
@@ -231,12 +231,12 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     income = summary.pop('__income__', 0.0)
     total_expenses = total + income  # total is already net (expenses - income)
 
-    # Fetch individual income items (excluding nómina)
+    # Fetch individual income items (excluding renta de trabajo)
     income_rows = [
         r for r in sheets._get_all_records()
         if r.get('Mes') == f"{year:04d}-{month:02d}"
         and r.get('Tipo') == 'income'
-        and not is_nomina(r.get('Descripción', ''))
+        and not is_renta_trabajo(r.get('Descripción', ''))
     ]
 
     lines = [f"<b>📊 Resumen {year}-{month:02d}</b>\n"]

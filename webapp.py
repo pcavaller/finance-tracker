@@ -26,7 +26,7 @@ from parsers import (
     OpenbankPDFParser, RevolutPDFParser, Transaction, BBVAParser,
 )
 from classifier import classify_batch, load_custom_rules, apply_type_overrides, apply_exclusions
-from sheets import SheetsClient, is_nomina
+from sheets import SheetsClient, is_renta_trabajo
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
 ALLOWED_CHAT_IDS: set[int] = {int(x) for x in os.getenv('ALLOWED_CHAT_IDS', '').split(',') if x}
@@ -219,7 +219,7 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
         if r.get('Banco', '') == 'Santander':
             continue
         desc = r.get('Descripción', '')
-        if is_nomina(desc):
+        if is_renta_trabajo(desc):
             continue
         if titular and r.get('Titular', '') != titular:
             continue
@@ -271,7 +271,7 @@ async def get_annual(year: int = None, titular: str = None):
             cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
             month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
         elif tipo == 'income' and r.get('Banco', '') != 'Santander':
-            if not is_nomina(r.get('Descripción', '')):
+            if not is_renta_trabajo(r.get('Descripción', '')):
                 month_income[mes] = month_income.get(mes, 0.0) + amt
     all_months = sorted(set(list(month_expenses.keys()) + list(month_income.keys())))
     sorted_months = [{'month': m, 'total': round(month_expenses.get(m, 0) - month_income.get(m, 0), 2)} for m in all_months if month_expenses.get(m, 0) > 0]
