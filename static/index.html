@@ -606,10 +606,10 @@
         </div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
           <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium" x-text="'Gastos ' + periodLabel()"></p>
-          <p class="text-base font-bold text-red-500 mt-1" x-text="fmtAmount(panorama.gasto_neto)"></p>
-          <p x-show="panorama.ingresos_no_laborales > 0" class="text-[10px] text-gray-400 mt-0.5 leading-tight"
-            title="Gasto bruto menos ingresos recibidos no laborales"
-            x-text="'bruto ' + fmtAmount(panorama.gastos) + ' · tras ' + fmtAmount(panorama.ingresos_no_laborales) + ' recibidos'"></p>
+          <p class="text-base font-bold text-red-500 mt-1" x-text="fmtAmount(panorama.gastos)"></p>
+          <p x-show="panorama.ingresos_no_laborales > 0" class="text-[11px] text-gray-600 font-semibold mt-0.5 leading-tight"
+            title="Gasto bruto menos los ingresos recibidos no laborales del periodo"
+            x-text="'neto ' + fmtAmount(panorama.gasto_neto) + ' · tras ' + fmtAmount(panorama.ingresos_no_laborales) + ' recibidos'"></p>
         </div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
           <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium" x-text="'Ahorro ' + periodLabel()"></p>
