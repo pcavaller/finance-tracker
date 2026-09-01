@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -47,6 +48,40 @@ def is_nomina(descripcion: str) -> bool:
 
 _RENTA_TRABAJO_KEYWORDS = ('STRIPE', 'BUENCOCO', 'HOSPITAL SANT JOAN', 'SAMARANCH GALLART')
 
+# Pagadores recurrentes de sesiones de la consulta de psicología de María cuyo
+# concepto de transferencia NO siempre dice "sesion" (la sociedad del paciente o
+# el propio paciente ponen su nombre). Lista explícita y ampliable: añadir aquí
+# cualquier pagador nuevo que se detecte sin la palabra "sesion" en el concepto.
+_MARIA_CONSULTA_PAGADORES = (
+    'CHEVERE J.R. SL', 'CHEVERE JR', 'CASTILLERO YUSTE', 'DOMINGUEZ NAVARRO',
+)
+
+# Concepto de sesión fechada de un paciente: "Sesion 13 Julio", "Sesion 26 Agosto",
+# "Sesion 3 Octubre". Distingue la consulta de María de un "Sesion de padel" o
+# "Sesion de coaching" que pudiera aparecer en un ingreso de Pablo.
+_SESION_FECHADA_RE = re.compile(r'SESI[OÓ]N\s+\d')
+
+
+def _is_sesion_psicologia_maria(desc_upper: str) -> bool:
+    """Pago de un paciente por una sesión de la consulta de psicología de María
+    (transferencia directa o Bizum). Es facturación de negocio propio, igual que
+    Stripe/Buencoco o el datáfono de Samaranch Gallart, así que cuenta como renta
+    de trabajo y queda fuera de los ingresos compensatorios. Aprobado por Pablo
+    2026-09-01.
+
+    Se reconoce por pagador conocido (_MARIA_CONSULTA_PAGADORES, para los que no
+    ponen concepto) o por concepto de sesión: 'Sesion Psicologia' o una sesión
+    fechada tipo 'Sesion 26 Agosto'. No basta con la palabra 'sesion' suelta para
+    no arrastrar un hipotético 'Sesion de padel'/'Sesion de coaching' de un ingreso
+    de Pablo (la función no recibe el titular). Verificado el 2026-09-01 contra
+    todo el histórico de ingresos de María: cubre los pagadores vistos (Chevere,
+    Castillero Yuste, Dominguez Navarro, Blanch Moliner) sin falsos positivos."""
+    if any(p in desc_upper for p in _MARIA_CONSULTA_PAGADORES):
+        return True
+    if 'SESION' not in desc_upper and 'SESIÓN' not in desc_upper:
+        return False
+    return 'PSICOLOG' in desc_upper or bool(_SESION_FECHADA_RE.search(desc_upper))
+
 
 def is_renta_trabajo(descripcion: str) -> bool:
     """Ingreso real de trabajo (nómina o negocio propio). Usado tanto por el
@@ -56,13 +91,17 @@ def is_renta_trabajo(descripcion: str) -> bool:
     ingreso puntual, así que debe quedar fuera de ambos cálculos por igual.
     Confirmado con Pablo 2026-08-03: Nómina DiverInvest (Pablo) + Stripe/Buencoco
     (consulta de María) + Hospital Sant Joan de Déu (nómina hospital de María) +
-    Datafono Samaranch Gallart (ingreso de María). Todo lo demás que aparece como
-    Tipo=income (Bizums, dinero de familia, devoluciones/cashback, transferencias
-    entre cuentas propias con nombre distinto) queda fuera — no es renta de trabajo."""
+    Datafono Samaranch Gallart (ingreso de María). Ampliado 2026-09-01: sesiones de
+    psicología que los pacientes de María pagan directamente por transferencia
+    (ver _is_sesion_psicologia_maria). Todo lo demás que aparece como Tipo=income
+    (Bizums, dinero de familia, devoluciones/cashback, transferencias entre cuentas
+    propias con nombre distinto) queda fuera — no es renta de trabajo."""
     if is_nomina(descripcion):
         return True
     d = descripcion.upper()
-    return any(kw in d for kw in _RENTA_TRABAJO_KEYWORDS)
+    if any(kw in d for kw in _RENTA_TRABAJO_KEYWORDS):
+        return True
+    return _is_sesion_psicologia_maria(d)
 
 
 class SheetsClient:
