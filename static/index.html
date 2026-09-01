@@ -79,7 +79,11 @@
       <!-- Total card -->
       <div class="mt-4 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-6 text-white shadow-lg">
         <p class="text-indigo-200 text-sm font-medium">Total gastado</p>
-        <p class="text-4xl font-bold mt-1" x-text="fmtAmount(dashTotal)"></p>
+        <p class="text-4xl font-bold mt-1" x-text="fmtAmount(dashGastoNeto)"></p>
+        <p x-show="dashIngresosNoLaborales > 0" class="text-indigo-200 text-xs mt-2 leading-relaxed">
+          Gasto bruto: <span x-text="fmtAmount(dashTotal)"></span><br>
+          Ingresos recibidos (no laborales): <span x-text="fmtAmount(dashIngresosNoLaborales)"></span>
+        </p>
         <p class="text-indigo-200 text-xs mt-2" x-text="activePerson ? '👤 ' + activePerson : '👥 Todos los titulares'"></p>
       </div>
 
@@ -91,6 +95,8 @@
       <!-- Categories breakdown -->
       <div x-show="!dashLoading && dashCategories.length > 0" class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-4">Por categoría</h2>
+        <p x-show="dashIngresosNoLaborales > 0" class="text-xs text-gray-400 -mt-2 mb-4"
+          x-text="'Suma bruta ' + fmtAmount(dashTotal) + ' · el total de arriba es neto tras ' + fmtAmount(dashIngresosNoLaborales) + ' de ingresos recibidos'"></p>
         <template x-for="cat in dashCategories" :key="cat.name">
           <div class="mb-3">
             <!-- Category row — clickable -->
@@ -368,7 +374,9 @@
               x-text="p.name.charAt(0).toUpperCase()"></div>
             <div class="flex-1">
               <p class="font-semibold text-gray-900" x-text="p.name"></p>
-              <p class="text-2xl font-bold text-indigo-600 mt-0.5" x-text="fmtAmount(p.total)"></p>
+              <p class="text-2xl font-bold text-indigo-600 mt-0.5" x-text="fmtAmount(p.gastoNeto)"></p>
+              <p x-show="p.ingresosNoLaborales > 0" class="text-xs text-gray-400 mt-0.5"
+                x-text="'bruto: ' + fmtAmount(p.total) + ' · tras ' + fmtAmount(p.ingresosNoLaborales) + ' recibidos'"></p>
             </div>
           </div>
           <div class="mt-4 grid grid-cols-2 gap-2">
@@ -515,8 +523,12 @@
       <div x-show="!annualLoading && annualCategories.length > 0"
         class="mt-4 bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl p-5 text-white shadow-lg">
         <p class="text-indigo-200 text-sm font-medium">Total gastado <span x-text="annualYear"></span></p>
-        <p class="text-4xl font-bold mt-1" x-text="fmtAmount(annualTotal)"></p>
-        <p class="text-indigo-200 text-xs mt-1" x-text="'Promedio mensual: ' + fmtAmount(annualTotal / (annualMonths.length || 1))"></p>
+        <p class="text-4xl font-bold mt-1" x-text="fmtAmount(annualGastoNeto)"></p>
+        <p x-show="annualIngresosNoLaborales > 0" class="text-indigo-200 text-xs mt-2 leading-relaxed">
+          Gasto bruto: <span x-text="fmtAmount(annualTotal)"></span><br>
+          (tras <span x-text="fmtAmount(annualIngresosNoLaborales)"></span> de ingresos recibidos no laborales)
+        </p>
+        <p class="text-indigo-200 text-xs mt-1" x-text="'Promedio mensual: ' + fmtAmount(annualGastoNeto / (annualMonths.length || 1))"></p>
       </div>
 
       <!-- Month by month table -->
@@ -525,13 +537,17 @@
         <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Por mes</h3>
         <template x-for="m in annualMonths" :key="m.month">
           <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
-            <span class="text-sm text-gray-700 capitalize" x-text="fmtMonthLabel(m.month)"></span>
+            <div class="flex flex-col">
+              <span class="text-sm text-gray-700 capitalize" x-text="fmtMonthLabel(m.month)"></span>
+              <span x-show="m.ingresos_no_laborales > 0" class="text-xs text-gray-400"
+                x-text="'bruto ' + fmtAmount(m.total)"></span>
+            </div>
             <div class="flex items-center gap-3">
               <div class="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-1.5 bg-indigo-400 rounded-full"
-                  :style="'width:' + Math.round((m.total / annualMaxMonth) * 100) + '%'"></div>
+                  :style="'width:' + Math.max(0, Math.round((m.gasto_neto / annualMaxMonth) * 100)) + '%'"></div>
               </div>
-              <span class="text-sm font-semibold text-gray-800 w-20 text-right" x-text="fmtAmount(m.total)"></span>
+              <span class="text-sm font-semibold text-gray-800 w-20 text-right" x-text="fmtAmount(m.gasto_neto)"></span>
             </div>
           </div>
         </template>
@@ -541,6 +557,8 @@
       <div x-show="!annualLoading && annualCategories.length > 0"
         class="mt-4 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Por categoría</h3>
+        <p x-show="annualIngresosNoLaborales > 0" class="text-xs text-gray-400 -mt-2 mb-3"
+          x-text="'Suma bruta ' + fmtAmount(annualTotal) + ' · el total de arriba es neto tras ' + fmtAmount(annualIngresosNoLaborales) + ' de ingresos recibidos'"></p>
         <template x-for="cat in annualCategories" :key="cat.name">
           <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0">
             <span class="text-sm text-gray-700" x-text="catEmoji(cat.name) + ' ' + cat.name"></span>
@@ -588,7 +606,10 @@
         </div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
           <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium" x-text="'Gastos ' + periodLabel()"></p>
-          <p class="text-base font-bold text-red-500 mt-1" x-text="fmtAmount(panorama.gastos)"></p>
+          <p class="text-base font-bold text-red-500 mt-1" x-text="fmtAmount(panorama.gasto_neto)"></p>
+          <p x-show="panorama.ingresos_no_laborales > 0" class="text-[10px] text-gray-400 mt-0.5 leading-tight"
+            title="Gasto bruto menos ingresos recibidos no laborales"
+            x-text="'bruto ' + fmtAmount(panorama.gastos) + ' · tras ' + fmtAmount(panorama.ingresos_no_laborales) + ' recibidos'"></p>
         </div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-3">
           <p class="text-[11px] text-gray-500 uppercase tracking-wide font-medium" x-text="'Ahorro ' + periodLabel()"></p>
@@ -914,6 +935,8 @@ function app() {
     dashCategories: [],
     dashIncome: 0,
     dashIncomeItems: [],
+    dashIngresosNoLaborales: 0,
+    dashGastoNeto: 0,
     dashLoading: false,
     dashChart: null,
     dashTxs: [],
@@ -954,6 +977,8 @@ function app() {
     annualCategories: [],
     annualMonths: [],
     annualTotal: 0,
+    annualIngresosNoLaborales: 0,
+    annualGastoNeto: 0,
     annualMaxMonth: 1,
     annualLoading: false,
 
@@ -964,7 +989,7 @@ function app() {
 
     // Dashboard general (panorama 12m / año cerrado)
     generalPeriod: '12m',
-    panorama: { ingresos: 0, gastos: 0, ahorro: 0, tasa_ahorro: 0, meses: [] },
+    panorama: { ingresos: 0, gastos: 0, ahorro: 0, tasa_ahorro: 0, ingresos_no_laborales: 0, gasto_neto: 0, meses: [] },
     panoramaLoading: false,
 
     // Vivienda (dentro de Dashboard general)
@@ -1064,6 +1089,10 @@ function app() {
         this.dashTotal = data.total_expenses || 0;
         this.dashIncome = data.income || 0;
         this.dashIncomeItems = data.income_items || [];
+        this.dashIngresosNoLaborales = data.ingresos_no_laborales || 0;
+        this.dashGastoNeto = (data.gasto_neto !== undefined && data.gasto_neto !== null)
+          ? data.gasto_neto
+          : (data.total_expenses || 0) - (data.ingresos_no_laborales || 0);
         this.dashCategories = Object.entries(data.summary || {})
           .filter(([name]) => !name.startsWith('__'))
           .map(([name, amount]) => ({ name, amount }))
@@ -1285,12 +1314,13 @@ function app() {
               const r = await fetch(`/api/summary?year=${y}&month=${m}&titular=${encodeURIComponent(name)}`);
               const data = await r.json();
               const total = data.total_expenses || 0;
+              const inl = data.ingresos_no_laborales || 0;
               const cats = Object.entries(data.summary || {})
                 .filter(([k]) => !k.startsWith('__'))
                 .map(([k, amount]) => ({ name: k, amount }))
                 .sort((a, b) => b.amount - a.amount)
                 .slice(0, 4);
-              return { name, total, topCats: cats };
+              return { name, total, topCats: cats, ingresosNoLaborales: inl, gastoNeto: total - inl };
             })
           );
         } else {
@@ -1300,11 +1330,13 @@ function app() {
             this.people.map(async name => {
               const catMap = {};
               let total = 0;
+              let inl = 0;
               await Promise.all(yearMonths.map(async ym => {
                 const [y, m] = ym.split('-');
                 const r = await fetch(`/api/summary?year=${y}&month=${m}&titular=${encodeURIComponent(name)}`);
                 const data = await r.json();
                 total += data.total_expenses || 0;
+                inl += data.ingresos_no_laborales || 0;
                 for (const [k, v] of Object.entries(data.summary || {})) {
                   if (k.startsWith('__')) continue;
                   catMap[k] = (catMap[k] || 0) + v;
@@ -1314,11 +1346,11 @@ function app() {
                 .map(([k, amount]) => ({ name: k, amount }))
                 .sort((a, b) => b.amount - a.amount)
                 .slice(0, 4);
-              return { name, total, topCats };
+              return { name, total, topCats, ingresosNoLaborales: inl, gastoNeto: total - inl };
             })
           );
         }
-        this.personasSummary = results.filter(p => p.total > 0 || p.topCats.length > 0);
+        this.personasSummary = results.filter(p => p.total > 0 || p.topCats.length > 0 || p.ingresosNoLaborales > 0);
       } catch (e) {
         this.showToast('Error cargando personas', true);
       } finally {
@@ -1392,6 +1424,8 @@ function app() {
       this.annualCategories = [];
       this.annualMonths = [];
       this.annualTotal = 0;
+      this.annualIngresosNoLaborales = 0;
+      this.annualGastoNeto = 0;
       try {
         let url = `/api/annual?year=${this.annualYear}`;
         if (this.activePerson) url += `&titular=${encodeURIComponent(this.activePerson)}`;
@@ -1400,7 +1434,11 @@ function app() {
         this.annualCategories = data.categories || [];
         this.annualMonths = data.months || [];
         this.annualTotal = data.total || 0;
-        this.annualMaxMonth = Math.max(...(data.months || []).map(m => m.total), 1);
+        this.annualIngresosNoLaborales = data.ingresos_no_laborales || 0;
+        this.annualGastoNeto = (data.gasto_neto !== undefined && data.gasto_neto !== null)
+          ? data.gasto_neto
+          : (data.total || 0) - (data.ingresos_no_laborales || 0);
+        this.annualMaxMonth = Math.max(...(data.months || []).map(m => m.gasto_neto), 1);
       } catch (e) {
         this.showToast('Error cargando datos anuales', true);
       } finally {
@@ -1421,7 +1459,7 @@ function app() {
         if (this.activePerson) url += `&titular=${encodeURIComponent(this.activePerson)}`;
         const r = await fetch(url);
         const data = await r.json();
-        this.panorama = data || { ingresos: 0, gastos: 0, ahorro: 0, tasa_ahorro: 0, meses: [] };
+        this.panorama = data || { ingresos: 0, gastos: 0, ahorro: 0, tasa_ahorro: 0, ingresos_no_laborales: 0, gasto_neto: 0, meses: [] };
       } catch (e) {
         this.showToast('Error cargando panorama general', true);
       } finally {

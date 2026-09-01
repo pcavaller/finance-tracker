@@ -26,7 +26,7 @@ from parsers import (
     OpenbankPDFParser, RevolutPDFParser, Transaction, BBVAParser,
 )
 from classifier import classify_batch, load_custom_rules, apply_type_overrides, apply_exclusions
-from sheets import SheetsClient, is_renta_trabajo
+from sheets import SheetsClient, is_renta_trabajo, sum_ingresos_no_laborales
 
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '')
 ALLOWED_CHAT_IDS: set[int] = {int(x) for x in os.getenv('ALLOWED_CHAT_IDS', '').split(',') if x}
@@ -231,7 +231,14 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
         income_items.append({'description': desc, 'amount': amt, 'date': r.get('Fecha', '')})
     income_items.sort(key=lambda x: x['amount'], reverse=True)
 
-    return {'summary': summary, 'total': total, 'total_expenses': total_expenses, 'income': income, 'income_items': income_items, 'year': year, 'month': month}
+    period_rows = [
+        r for r in sheets._get_all_records()
+        if r.get('Mes') == month_str and (not titular or r.get('Titular', '') == titular)
+    ]
+    ingresos_no_laborales = round(sum_ingresos_no_laborales(period_rows), 2)
+    gasto_neto = round(total_expenses - ingresos_no_laborales, 2)
+
+    return {'summary': summary, 'total': total, 'total_expenses': total_expenses, 'income': income, 'income_items': income_items, 'ingresos_no_laborales': ingresos_no_laborales, 'gasto_neto': gasto_neto, 'year': year, 'month': month}
 
 
 @api.get("/transactions")
@@ -255,25 +262,47 @@ async def get_annual(year: int = None, titular: str = None):
     rows = sheets._get_all_records()
     cat_totals: dict[str, float] = {}
     month_expenses: dict[str, float] = {}
+    month_inl: dict[str, float] = {}  # ingresos no laborales (income ∧ ¬renta_trabajo), por mes
     for r in rows:
         mes = r.get('Mes', '')
         if not mes.startswith(str(year)):
             continue
         if titular and r.get('Titular', '') != titular:
             continue
-        if r.get('Tipo', '') != 'expense':
-            continue
+        tipo = r.get('Tipo', '')
         try:
             amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
         except ValueError:
             continue
-        cat = r.get('Categoría') or 'Otros'
-        cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
-        month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
-    sorted_months = [{'month': m, 'total': round(v, 2)} for m, v in sorted(month_expenses.items()) if v > 0]
+        if tipo == 'expense':
+            cat = r.get('Categoría') or 'Otros'
+            cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
+            month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
+        elif tipo == 'income' and not is_renta_trabajo(r.get('Descripción', '')):
+            month_inl[mes] = month_inl.get(mes, 0.0) + amt
+    sorted_months = []
+    for m, v in sorted(month_expenses.items()):
+        if v <= 0:
+            continue
+        inl = round(month_inl.get(m, 0.0), 2)
+        sorted_months.append({
+            'month': m,
+            'total': round(v, 2),
+            'ingresos_no_laborales': inl,
+            'gasto_neto': round(v - inl, 2),
+        })
     sorted_cats = sorted([{'name': k, 'amount': round(v, 2)} for k, v in cat_totals.items()], key=lambda x: -x['amount'])
     gross_total = round(sum(m['total'] for m in sorted_months), 2)
-    return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': gross_total, 'months_with_data': len(sorted_months)}
+    total_inl = round(sum(month_inl.values()), 2)
+    return {
+        'year': year,
+        'categories': sorted_cats,
+        'months': sorted_months,
+        'total': gross_total,
+        'ingresos_no_laborales': total_inl,
+        'gasto_neto': round(gross_total - total_inl, 2),
+        'months_with_data': len(sorted_months),
+    }
 
 
 @api.get("/monthly_totals")
@@ -626,11 +655,22 @@ async def get_panorama_12m(titular: str = None, period: str = '12m'):
         total_income += income
         total_expenses += net + income
     ahorro = total_income - total_expenses
+
+    month_keys = {f"{y:04d}-{m:02d}" for y, m in months}
+    period_rows = [
+        r for r in sheets._get_all_records()
+        if r.get('Mes') in month_keys and (not titular or r.get('Titular', '') == titular)
+    ]
+    ingresos_no_laborales = round(sum_ingresos_no_laborales(period_rows), 2)
+    gasto_neto = round(round(total_expenses, 2) - ingresos_no_laborales, 2)
+
     return {
         'ingresos': round(total_income, 2),
         'gastos': round(total_expenses, 2),
         'ahorro': round(ahorro, 2),
         'tasa_ahorro': round(ahorro / total_income, 4) if total_income else 0.0,
+        'ingresos_no_laborales': ingresos_no_laborales,
+        'gasto_neto': gasto_neto,
         'periodo': period,
         'meses': _completitud_meses(months, titular or None),
     }

@@ -122,6 +122,30 @@ def is_renta_trabajo(descripcion: str) -> bool:
     return _is_sesion_psicologia_maria(d)
 
 
+def sum_ingresos_no_laborales(rows: list[dict]) -> float:
+    """Σ ABS(Importe) de las filas con Tipo == 'income' que NO son renta de
+    trabajo (is_renta_trabajo(desc) == False). `rows` viene ya filtrado por
+    periodo/titular. Es el conjunto que netea contra el gasto para el número
+    secundario "gasto neto tras ingresos no laborales" en Inicio, Anual,
+    Personas y Dashboard general.
+
+    A diferencia del modo compensatorio de get_monthly_summary, aquí NO se aplica
+    ningún carve-out de Santander: el set es simplemente income ∧ ¬renta_trabajo.
+    'alquiler', 'fianza', 'patrimonio', 'internal' e 'investment' quedan fuera por
+    no tener Tipo == 'income'."""
+    total = 0.0
+    for r in rows:
+        if r.get('Tipo') != 'income':
+            continue
+        if is_renta_trabajo(r.get('Descripción', '')):
+            continue
+        try:
+            total += abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        except ValueError:
+            continue
+    return total
+
+
 class SheetsClient:
 
     def __init__(self, credentials_path: str = None, sheet_id: str = None):
