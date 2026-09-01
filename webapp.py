@@ -664,7 +664,7 @@ async def search_transactions(q: str = '', titular: str = None):
             'titular': r.get('Titular', ''),
             'mes': r.get('Mes', ''),
         })
-    results.sort(key=lambda x: x.get('mes', '') + x.get('date', ''), reverse=True)
+    results.sort(key=lambda x: _parse_sheet_date(x.get('date', '')) or datetime.min, reverse=True)
     return {'transactions': results[:150]}
 
 
