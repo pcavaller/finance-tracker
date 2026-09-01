@@ -59,6 +59,14 @@ def test_api_summary_expone_ingresos_no_laborales_y_gasto_neto_negativo(monkeypa
     assert data['ingresos_no_laborales'] == 270.0   # 30 + 200 + 40 (nómina y alquiler fuera)
     assert data['gasto_neto'] == -120.0             # 150 - 270, negativo aceptable para el secundario
 
+    # La lista que acompaña a "Ingresos recibidos (no laborales)" usa EXACTAMENTE
+    # el mismo conjunto que la cifra: income ∧ ¬renta_trabajo, SIN carve-out de
+    # Santander -> Σ(lista) == ingresos_no_laborales, y el Bizum vía Santander entra.
+    items = data['ingresos_no_laborales_items']
+    assert [i['amount'] for i in items] == [200.0, 40.0, 30.0]   # ordenada desc
+    assert any('Santander' in i['description'] for i in items)
+    assert round(sum(i['amount'] for i in items), 2) == data['ingresos_no_laborales']
+
 
 def test_api_summary_gasto_neto_positivo_normal(monkeypatch):
     mes = '2099-02'

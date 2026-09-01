@@ -238,7 +238,25 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
     ingresos_no_laborales = round(sum_ingresos_no_laborales(period_rows), 2)
     gasto_neto = round(total_expenses - ingresos_no_laborales, 2)
 
-    return {'summary': summary, 'total': total, 'total_expenses': total_expenses, 'income': income, 'income_items': income_items, 'ingresos_no_laborales': ingresos_no_laborales, 'gasto_neto': gasto_neto, 'year': year, 'month': month}
+    # Desglose que acompaña a "Ingresos recibidos (no laborales)" bajo el gasto
+    # neto: MISMO conjunto que `sum_ingresos_no_laborales` (income ∧ ¬renta_trabajo,
+    # SIN carve-out de Santander), de modo que Σ(lista) == ingresos_no_laborales.
+    # Distinto de `income_items` de arriba, que sigue el modo compensatorio
+    # (excluye Santander) para el panel verde "Ingresos".
+    ingresos_no_laborales_items = []
+    for r in period_rows:
+        if r.get('Tipo') != 'income' or is_renta_trabajo(r.get('Descripción', '')):
+            continue
+        try:
+            amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+        except ValueError:
+            continue
+        ingresos_no_laborales_items.append(
+            {'description': r.get('Descripción', ''), 'amount': amt, 'date': r.get('Fecha', '')}
+        )
+    ingresos_no_laborales_items.sort(key=lambda x: x['amount'], reverse=True)
+
+    return {'summary': summary, 'total': total, 'total_expenses': total_expenses, 'income': income, 'income_items': income_items, 'ingresos_no_laborales': ingresos_no_laborales, 'ingresos_no_laborales_items': ingresos_no_laborales_items, 'gasto_neto': gasto_neto, 'year': year, 'month': month}
 
 
 @api.get("/transactions")

@@ -150,10 +150,11 @@
         </template>
       </div>
 
-      <!-- Income breakdown -->
-      <div x-show="!dashLoading && dashIncome > 0" class="mt-4 bg-green-50 rounded-2xl border border-green-100 p-5">
-        <h2 class="text-sm font-semibold text-green-700 uppercase tracking-wide mb-3">📥 Ingresos recibidos</h2>
-        <template x-for="item in dashIncomeItems" :key="item.description + item.date">
+      <!-- Ingresos recibidos (no laborales) — mismo conjunto y misma suma que la
+           cifra "Ingresos recibidos (no laborales)" del gasto neto de arriba. -->
+      <div x-show="!dashLoading && dashIngresosNoLaborales > 0" class="mt-4 bg-green-50 rounded-2xl border border-green-100 p-5">
+        <h2 class="text-sm font-semibold text-green-700 uppercase tracking-wide mb-3">📥 Ingresos recibidos (no laborales)</h2>
+        <template x-for="item in dashIngNoLabItems" :key="item.description + item.date + item.amount">
           <div class="flex justify-between items-center py-1.5 border-b border-green-100 last:border-0">
             <div class="flex-1 min-w-0">
               <p class="text-xs text-gray-700 truncate" x-text="item.description"></p>
@@ -163,8 +164,8 @@
           </div>
         </template>
         <div class="flex justify-between items-center mt-2 pt-2 border-t border-green-200">
-          <span class="text-sm font-semibold text-green-700">Total ingresos</span>
-          <span class="text-sm font-bold text-green-600" x-text="'+' + fmtAmount(dashIncome)"></span>
+          <span class="text-sm font-semibold text-green-700">Total ingresos recibidos</span>
+          <span class="text-sm font-bold text-green-600" x-text="'+' + fmtAmount(dashIngresosNoLaborales)"></span>
         </div>
       </div>
 
@@ -933,9 +934,8 @@ function app() {
     dashMonth: new Date().getMonth() + 1,
     dashTotal: 0,
     dashCategories: [],
-    dashIncome: 0,
-    dashIncomeItems: [],
     dashIngresosNoLaborales: 0,
+    dashIngNoLabItems: [],
     dashGastoNeto: 0,
     dashLoading: false,
     dashChart: null,
@@ -1087,9 +1087,8 @@ function app() {
         const r = await fetch(url);
         const data = await r.json();
         this.dashTotal = data.total_expenses || 0;
-        this.dashIncome = data.income || 0;
-        this.dashIncomeItems = data.income_items || [];
         this.dashIngresosNoLaborales = data.ingresos_no_laborales || 0;
+        this.dashIngNoLabItems = data.ingresos_no_laborales_items || [];
         this.dashGastoNeto = (data.gasto_neto !== undefined && data.gasto_neto !== null)
           ? data.gasto_neto
           : (data.total_expenses || 0) - (data.ingresos_no_laborales || 0);
