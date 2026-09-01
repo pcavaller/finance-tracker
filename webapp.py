@@ -506,6 +506,12 @@ async def get_vivienda():
         desc = r['description']
         if desc in _VIVIENDA_EXCLUDE_FROM_PAGADO:
             bucket = 'financiacion_recibida'
+        elif r['category'] == 'Hipoteca':
+            # Cuota + interés prorrateado de la hipoteca: servicio de deuda recurrente,
+            # ya cuenta como gasto mensual en el cash flow (get_monthly_summary). No es
+            # aportación a la compra, así que NO va en total_pagado ni infla "de bolsillo".
+            # Check por categoría (no por descripción) porque habrá una fila Hipoteca al mes.
+            bucket = 'hipoteca'
         else:
             total_pagado += abs(r['amount'])
             bucket = 'seguro' if desc in _VIVIENDA_SEGURO_VINCULADO else 'pagado'
@@ -523,6 +529,7 @@ async def get_vivienda():
 
     total_financiado = sheets.get_total_financiado()
     prestamos = sheets.get_prestamos()
+    alquiler = sheets.get_alquiler_vivienda(months=12)
     return {
         'transactions': tx_out,
         'summary': {
@@ -531,6 +538,8 @@ async def get_vivienda():
             'diferencia': round(total_financiado - total_pagado, 2),
             'seguro_vinculado': round(seguro_vinculado, 2),
         },
+        'ingresos_alquiler_12m': alquiler['total'],
+        'ingresos_alquiler_mensual': alquiler['mensual'],
         'prestamos': prestamos,
         'calendario_padre': _build_calendario_padre(prestamos),
         'amortizacion_hipoteca': _build_amortizacion_hipoteca(prestamos, tx_out),
@@ -574,7 +583,7 @@ async def search_transactions(q: str = '', titular: str = None):
     rows = sheets._get_all_records()
     results = []
     for r in rows:
-        if r.get('Tipo') not in ('expense', 'income'):
+        if r.get('Tipo') not in ('expense', 'income', 'alquiler'):
             continue
         if titular and r.get('Titular', '') != titular:
             continue

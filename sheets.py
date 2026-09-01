@@ -510,6 +510,36 @@ class SheetsClient:
                 continue
         return total
 
+    def get_alquiler_vivienda(self, months: int = 12) -> dict:
+        """Renta de habitaciones (Tipo 'alquiler'): total y desglose mensual de los
+        últimos `months` meses. Tipo 'alquiler' es paralelo a 'fianza'/'patrimonio':
+        queda fuera de income/expense en get_monthly_summary y en toda agregación de
+        cash flow, así que NO aparece en Inicio, en el anual ni en el panorama de
+        ingresos. Esto es lo único que lo lee, para mostrarlo aparte en la sección
+        Vivienda del Dashboard general."""
+        from datetime import datetime
+        now = datetime.now()
+        meses_validos = set()
+        y, m = now.year, now.month
+        for _ in range(months):
+            meses_validos.add(f"{y:04d}-{m:02d}")
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+        mensual: dict[str, float] = {}
+        for r in self._get_all_records():
+            if r.get('Tipo') != 'alquiler' or r.get('Mes') not in meses_validos:
+                continue
+            try:
+                amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
+            except ValueError:
+                continue
+            mensual[r['Mes']] = mensual.get(r['Mes'], 0.0) + amt
+        return {
+            'total': round(sum(mensual.values()), 2),
+            'mensual': {k: round(v, 2) for k, v in sorted(mensual.items())},
+        }
+
     def get_vivienda_transactions(self) -> list[dict]:
         """Todas las filas de la vista Vivienda: Categoría en {'Compra vivienda', 'Hipoteca'}
         o Vivienda='Sí' (columna independiente de Tipo/Categoría, no afecta cash flow).

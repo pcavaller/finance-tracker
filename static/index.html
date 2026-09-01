@@ -641,6 +641,11 @@
           <p class="text-lg font-bold text-amber-700 mt-1" x-text="fmtAmount(viviendaSummary.seguro_vinculado)"></p>
           <p class="text-xs text-amber-600 mt-1">Financiado por el banco dentro del préstamo — cuenta en el financiado y en el pagado de arriba, esto es solo el desglose.</p>
         </div>
+        <div class="bg-green-50 rounded-2xl border border-green-100 p-4">
+          <p class="text-xs text-green-700 uppercase tracking-wide font-medium">Ingresos vivienda (12m)</p>
+          <p class="text-lg font-bold text-green-700 mt-1" x-text="'+' + fmtAmount(viviendaIngresosAlquiler12m)"></p>
+          <p class="text-xs text-green-600 mt-1">Renta de habitaciones (Tipo <span class="font-mono">alquiler</span>). Fuera del ingreso del hogar en Inicio, en el anual y en el panorama — solo se ve aquí.</p>
+        </div>
       </div>
 
       <!-- Tab: Hipoteca -->
@@ -745,8 +750,8 @@
               <p class="text-xs text-gray-400 mt-0.5" x-text="tx.date + ' · ' + tx.category + (tx.titular ? ' · ' + tx.titular : '')"></p>
             </div>
             <span class="font-semibold shrink-0"
-              :class="tx.bucket === 'pagado' ? 'text-red-500' : (tx.bucket === 'seguro' ? 'text-amber-500' : 'text-green-600')"
-              x-text="(tx.bucket === 'pagado' ? '-' : '+') + fmtAmount(Math.abs(tx.amount))"></span>
+              :class="(tx.bucket === 'pagado' || tx.bucket === 'hipoteca') ? 'text-red-500' : (tx.bucket === 'seguro' ? 'text-amber-500' : 'text-green-600')"
+              x-text="((tx.bucket === 'pagado' || tx.bucket === 'hipoteca') ? '-' : '+') + fmtAmount(Math.abs(tx.amount))"></span>
           </div>
         </template>
         <p x-show="viviendaTxs.length === 0" class="text-sm text-gray-400 text-center py-4">Sin movimientos de vivienda</p>
@@ -940,6 +945,8 @@ function app() {
     viviendaTab: 'resumen',
     viviendaTxs: [],
     viviendaSummary: { total_financiado: 0, total_pagado: 0, diferencia: 0, seguro_vinculado: 0 },
+    viviendaIngresosAlquiler12m: 0,
+    viviendaIngresosAlquilerMensual: {},
     viviendaPrestamos: [],
     viviendaCalendario: null,
     viviendaAmortizacion: null,
@@ -1385,6 +1392,8 @@ function app() {
         const data = await r.json();
         this.viviendaTxs = data.transactions || [];
         this.viviendaSummary = data.summary || { total_financiado: 0, total_pagado: 0, diferencia: 0, seguro_vinculado: 0 };
+        this.viviendaIngresosAlquiler12m = data.ingresos_alquiler_12m || 0;
+        this.viviendaIngresosAlquilerMensual = data.ingresos_alquiler_mensual || {};
         this.viviendaPrestamos = data.prestamos || [];
         this.viviendaCalendario = data.calendario_padre || null;
         this.viviendaAmortizacion = data.amortizacion_hipoteca || null;
