@@ -542,32 +542,97 @@ async def get_vivienda():
     }
 
 
-@api.get("/panorama_12m")
-async def get_panorama_12m(titular: str = None):
-    """Ingresos/Gastos/Ahorro agregados de los últimos 12 meses. Reutiliza
-    sheets.get_monthly_summary (misma función que /api/summary) mes a mes y suma —
-    no duplica lógica de cálculo, solo cambia la ventana de 1 mes a 12.
-    real_income=True: aquí Ingresos = nómina + rentas del trabajo (ingreso real),
-    a diferencia de /api/summary que muestra el ingreso 'compensatorio' (sin nómina/Santander)."""
+def _panorama_months(period: str) -> list[tuple[int, int]]:
+    """Meses (año, mes) del período pedido, en orden cronológico ascendente.
+    Un año natural (`period` en '2024'..'2026') da sus 12 meses; '12m' da la
+    ventana móvil actual (mes en curso incluido, igual que antes)."""
     now = datetime.now()
-    total_income = 0.0
-    total_expenses = 0.0
+    if period.isdigit() and len(period) == 4:
+        year = int(period)
+        return [(year, m) for m in range(1, 13)]
+    months = []
     y, m = now.year, now.month
     for _ in range(12):
+        months.append((y, m))
+        m -= 1
+        if m == 0:
+            m, y = 12, y - 1
+    months.reverse()
+    return months
+
+
+def _completitud_meses(months: list[tuple[int, int]], titular: str = None) -> list[dict]:
+    """Nº de filas expense/income por mes de `months` vs la media de los demás
+    meses del propio set (regla de PROJECT.md: desviación > 40% → incompleto).
+    Mes futuro o con 0 filas → 'sin_datos' (no es lo mismo que 'incompleto': un
+    mes futuro no es un import fallido, simplemente no ha pasado)."""
+    now = datetime.now()
+    rows = sheets._get_all_records()
+    counts: dict[str, int] = {f"{y:04d}-{m:02d}": 0 for y, m in months}
+    for r in rows:
+        mes = r.get('Mes', '')
+        if mes not in counts:
+            continue
+        if r.get('Tipo') not in ('expense', 'income'):
+            continue
+        if titular and r.get('Titular', '') != titular:
+            continue
+        counts[mes] += 1
+
+    out = []
+    for y, m in months:
+        mes = f"{y:04d}-{m:02d}"
+        n_filas = counts[mes]
+        otros = [c for k, c in counts.items() if k != mes]
+        media_filas = sum(otros) / len(otros) if otros else 0.0
+        es_futuro = (y, m) > (now.year, now.month)
+        if es_futuro or n_filas == 0:
+            estado = 'sin_datos'
+            completo = False
+        elif media_filas > 0 and n_filas < 0.6 * media_filas:
+            estado = 'incompleto'
+            completo = False
+        else:
+            estado = 'completo'
+            completo = True
+        desviacion_pct = round((n_filas - media_filas) / media_filas, 4) if media_filas else 0.0
+        out.append({
+            'mes': mes,
+            'n_filas': n_filas,
+            'media_filas': round(media_filas, 2),
+            'completo': completo,
+            'estado': estado,
+            'desviacion_pct': desviacion_pct,
+        })
+    return out
+
+
+@api.get("/panorama_12m")
+async def get_panorama_12m(titular: str = None, period: str = '12m'):
+    """Ingresos/Gastos/Ahorro agregados del período pedido. Reutiliza
+    sheets.get_monthly_summary (misma función que /api/summary) mes a mes y suma —
+    no duplica lógica de cálculo, solo cambia la ventana de meses.
+    `period`: '12m' (default, ventana móvil actual, comportamiento de siempre) o
+    un año natural ('2024', '2025', '2026'...), en cuyo caso itera sus 12 meses.
+    real_income=True: aquí Ingresos = nómina + rentas del trabajo (ingreso real),
+    a diferencia de /api/summary que muestra el ingreso 'compensatorio' (sin nómina/Santander)."""
+    months = _panorama_months(period)
+    total_income = 0.0
+    total_expenses = 0.0
+    for y, m in months:
         s = sheets.get_monthly_summary(y, m, titular=titular or None, real_income=True)
         income = s.get('__income__', 0.0)
         net = s.get('__total__', 0.0)  # expenses - income, per get_monthly_summary
         total_income += income
         total_expenses += net + income
-        m -= 1
-        if m == 0:
-            m, y = 12, y - 1
     ahorro = total_income - total_expenses
     return {
         'ingresos': round(total_income, 2),
         'gastos': round(total_expenses, 2),
         'ahorro': round(ahorro, 2),
         'tasa_ahorro': round(ahorro / total_income, 4) if total_income else 0.0,
+        'periodo': period,
+        'meses': _completitud_meses(months, titular or None),
     }
 
 
