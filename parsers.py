@@ -151,6 +151,35 @@ def _strip_accents(s: str) -> str:
     return ''.join(c for c in unicodedata.normalize('NFKD', str(s or '')) if not unicodedata.combining(c))
 
 
+# Variantes del propio nombre de María Ruisánchez como contraparte de una
+# transferencia entrante: es un traspaso entre cuentas propias suyas, no un
+# ingreso real. Las dos primeras ya viven en OWN_ACCOUNT_KEYWORDS (alias de su
+# Revolut y su apellido compuesto); se listan aquí para acotar la comprobación al
+# nombre de María sin arrastrar el resto de identidades propias (Pablo, brokers…).
+_MARIA_OWN_NAME_MARKERS = (
+    'MAR A ROSALIA',        # "María Rosalía" con la í perdida por la codificación del extracto
+    'RUISANCHEZ GONZALEZ',  # apellido compuesto Ruisánchez González-Barros
+    'SANTANDER MERI',
+    'BBVA MERI',
+)
+
+
+def _is_maria_own_identity(*texts: str) -> bool:
+    """La contraparte de una transferencia es una variante del propio nombre de
+    María Ruisánchez (traspaso entre cuentas propias suyas, no un ingreso real).
+    Tolera la í/á perdida por la codificación del extracto ("Mar a Rosalia Ruis
+    nchez Gonzalez Barros") y el mojibake UTF-8→Latin-1 ("Marãa Rosalia
+    Ruisã¡nchez Gonzalez Barros")."""
+    n = _strip_accents(' '.join(texts)).upper()
+    if any(m in n for m in _MARIA_OWN_NAME_MARKERS):
+        return True
+    if 'RUISANCHEZ' in n and 'MARIA' in n:
+        return True
+    # Nombre completo con los apellidos compuestos, resistente a que "Ruisánchez"
+    # llegue partido ("Ruis nchez") o como mojibake ("Ruisa¡nchez").
+    return 'ROSALIA' in n and 'GONZALEZ' in n and 'BARROS' in n
+
+
 def disambiguate_duplicates(transactions: list[Transaction]) -> None:
     """Mutates descriptions in-place when two or more transactions in the same
     import batch would collide on the Sheets dedupe key (fecha + descripción +
@@ -949,8 +978,11 @@ class SantanderPDFParser:
         # Determine tx_type
         # Santander account belongs to María Ruisánchez: outgoing movements are internal
         # transfers (between own accounts or personal payments), never tracked as expenses.
+        # Incoming movements are income EXCEPT when the counterparty is a variant of
+        # María's own name: that's a transfer between her own accounts, so 'internal'
+        # (refinement of "Santander income → income", decided 2026-09-01).
         if amount_val > 0:
-            tx_type = 'income'
+            tx_type = 'internal' if _is_maria_own_identity(description) else 'income'
         else:
             tx_type = 'internal'
 

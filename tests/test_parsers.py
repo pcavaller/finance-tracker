@@ -17,7 +17,13 @@ from pathlib import Path
 
 import pytest
 
-from parsers import OpenbankPDFParser, RevolutPDFParser, TradeRepublicParser
+from parsers import (
+    OpenbankPDFParser,
+    RevolutPDFParser,
+    SantanderPDFParser,
+    TradeRepublicParser,
+    _is_maria_own_identity,
+)
 
 FIXTURES = Path(__file__).parent.parent / "Extractos"
 
@@ -106,6 +112,61 @@ class TestOpenbankPDFParser:
         ]
         assert internal_like, "el extracto de prueba debería contener alguna de estas transferencias"
         assert all(t.tx_type == "internal" for t in internal_like)
+
+
+class TestMariaOwnIdentity:
+    """`_is_maria_own_identity` reconoce la contraparte 'María a sí misma' en
+    cualquier banco (traspaso propio, no ingreso), tolerando los acentos rotos y
+    el mojibake de los extractos reales de Santander."""
+
+    @pytest.mark.parametrize("desc", [
+        "Transferencia Inmediata De Mar A Rosalia Ruis Nchez Gonzalez Barros,",
+        "Transferencia De Marãa Rosalia Ruisã¡nchez Gonzalez Barros, .",
+        "Transferencia De Ruisanchez Gonzalez-barros Maria Rosalia, .",
+        "Transferencia de MARIA RUISANCHEZ",
+        "Transferencia A Favor De María Ruisánchez Concepto: Julio",
+    ])
+    def test_maria_name_variants_detected(self, desc):
+        assert _is_maria_own_identity(desc)
+
+    @pytest.mark.parametrize("desc", [
+        "Transferencia De Stripe, Concepto Buencoco Slu.",
+        "Transferencia De Hospital Sant Joan De Deu, .",
+        "Transferencia Inmediata De Chevere J.r. Sl, Concepto Sesion Psicologia",
+        "Transferencia Inmediata De Monteagudo Martinez, Victor, Concepto Terapia",
+        "Transferencia Inmediata De Natalia Castillero Yuste, Concepto Enviada Desde Revolut",
+        "Transferencia Inmediata De Parroquia Sant Sebastia De Verdum, Concepto Pago Ftra. M-7",
+    ])
+    def test_third_parties_not_detected(self, desc):
+        assert not _is_maria_own_identity(desc)
+
+
+class TestSantanderParserOwnTransfer:
+    """Regresión: una transferencia entrante en el Santander de María cuya
+    contraparte es ella misma → 'internal'; de un tercero → 'income'."""
+
+    def _tx(self, line: str):
+        return SantanderPDFParser()._parse_block([line])
+
+    def test_incoming_from_maria_is_internal(self):
+        tx = self._tx("26 ene 2026 Transferencia inmediata de MAR A ROSALIA RUIS "
+                      "NCHEZ GONZALEZ BARROS 1.897,06€ 10.000,00€")
+        assert tx is not None
+        assert tx.bank == "Santander"
+        assert tx.tx_type == "internal"
+        assert tx.amount == pytest.approx(1897.06)
+
+    def test_incoming_from_third_party_is_income(self):
+        tx = self._tx("25 jul 2026 Transferencia inmediata de Chevere J.R. SL "
+                      "Concepto Sesion Psicologia 70,00€ 10.070,00€")
+        assert tx is not None
+        assert tx.tx_type == "income"
+        assert tx.amount == pytest.approx(70.0)
+
+    def test_outgoing_still_internal(self):
+        tx = self._tx("10 jul 2026 Recibo Ballester Xxi S.l. -74,78€ 9.000,00€")
+        assert tx is not None
+        assert tx.tx_type == "internal"
 
 
 @requires_fixtures
