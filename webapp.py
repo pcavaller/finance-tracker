@@ -210,6 +210,7 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
     summary = sheets.get_monthly_summary(year, month, titular=titular or None)
     total = summary.pop('__total__', 0.0)
     income = summary.pop('__income__', 0.0)
+    total_expenses = round(sum(summary.values()), 2)
 
     month_str = f"{year:04d}-{month:02d}"
     income_items = []
@@ -230,7 +231,7 @@ async def get_summary(year: int = None, month: int = None, titular: str = None):
         income_items.append({'description': desc, 'amount': amt, 'date': r.get('Fecha', '')})
     income_items.sort(key=lambda x: x['amount'], reverse=True)
 
-    return {'summary': summary, 'total': total, 'income': income, 'income_items': income_items, 'year': year, 'month': month}
+    return {'summary': summary, 'total': total, 'total_expenses': total_expenses, 'income': income, 'income_items': income_items, 'year': year, 'month': month}
 
 
 @api.get("/transactions")
@@ -254,30 +255,25 @@ async def get_annual(year: int = None, titular: str = None):
     rows = sheets._get_all_records()
     cat_totals: dict[str, float] = {}
     month_expenses: dict[str, float] = {}
-    month_income: dict[str, float] = {}
     for r in rows:
         mes = r.get('Mes', '')
         if not mes.startswith(str(year)):
             continue
         if titular and r.get('Titular', '') != titular:
             continue
+        if r.get('Tipo', '') != 'expense':
+            continue
         try:
             amt = abs(float(str(r.get('Importe', 0)).replace(',', '.')))
         except ValueError:
             continue
-        tipo = r.get('Tipo', '')
-        if tipo == 'expense':
-            cat = r.get('Categoría') or 'Otros'
-            cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
-            month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
-        elif tipo == 'income' and r.get('Banco', '') != 'Santander':
-            if not is_renta_trabajo(r.get('Descripción', '')):
-                month_income[mes] = month_income.get(mes, 0.0) + amt
-    all_months = sorted(set(list(month_expenses.keys()) + list(month_income.keys())))
-    sorted_months = [{'month': m, 'total': round(month_expenses.get(m, 0) - month_income.get(m, 0), 2)} for m in all_months if month_expenses.get(m, 0) > 0]
+        cat = r.get('Categoría') or 'Otros'
+        cat_totals[cat] = cat_totals.get(cat, 0.0) + amt
+        month_expenses[mes] = month_expenses.get(mes, 0.0) + amt
+    sorted_months = [{'month': m, 'total': round(v, 2)} for m, v in sorted(month_expenses.items()) if v > 0]
     sorted_cats = sorted([{'name': k, 'amount': round(v, 2)} for k, v in cat_totals.items()], key=lambda x: -x['amount'])
-    net_total = round(sum(m['total'] for m in sorted_months), 2)
-    return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': net_total}
+    gross_total = round(sum(m['total'] for m in sorted_months), 2)
+    return {'year': year, 'categories': sorted_cats, 'months': sorted_months, 'total': gross_total, 'months_with_data': len(sorted_months)}
 
 
 @api.get("/monthly_totals")
