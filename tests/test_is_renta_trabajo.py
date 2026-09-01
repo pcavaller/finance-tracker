@@ -27,6 +27,13 @@ RENTA_TRABAJO = [
     "Transferencia De Natalia Castillero Yuste, Concepto Natalia Castillero.",
     # Paciente nuevo, no en la lista de pagadores, pero concepto "Sesion"
     "Transferencia Inmediata De Miriam Blanch Moliner, Concepto Sesion 13 Julio",
+    # Ampliación 2026-09-01: concepto "terapia"/"cita" gated por pagadora conocida
+    "Bizum de VALERIA DUARTE RAMIREZ terapia",
+    "Bizum de VALERIA D R cita",
+    "Transferencia Inmediata De Monteagudo Martinez, Victor, Concepto Terapia-drama",
+    "Transferencia Inmediata De Monteagudo Martinez, Victor, Concepto Terapia",
+    # "ó" mal codificada como guion en "Sesi-n"
+    "Transferencia De Rocio Novella Ceperuelo, Concepto Sesi-n 3 Octubre.",
 ]
 
 NO_RENTA_TRABAJO = [
@@ -40,6 +47,12 @@ NO_RENTA_TRABAJO = [
     # Ingreso de Pablo que contiene "sesion" pero NO es la consulta de María
     "Bizum de Carlos M R sesion de padel del sabado",
     "Transferencia De Un Cliente, Concepto Sesion De Coaching Financiero",
+    # "terapia"/"cita" sin pagadora conocida: palabras demasiado comunes, no disparan
+    "Bizum de Pablo G R cita con el gestor del banco",
+    "Transferencia De Terapia De Pareja Centre, Concepto Sesiones",
+    "DEVOLUCION / REEMBOLSO CITA MEDICO PRIVADO",
+    "Bizum de Un Amigo terapia",
+    "Transferencia De Una Clinica, Concepto Cita Fisioterapia",
 ]
 
 

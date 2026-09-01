@@ -54,12 +54,25 @@ _RENTA_TRABAJO_KEYWORDS = ('STRIPE', 'BUENCOCO', 'HOSPITAL SANT JOAN', 'SAMARANC
 # cualquier pagador nuevo que se detecte sin la palabra "sesion" en el concepto.
 _MARIA_CONSULTA_PAGADORES = (
     'CHEVERE J.R. SL', 'CHEVERE JR', 'CASTILLERO YUSTE', 'DOMINGUEZ NAVARRO',
+    'MONTEAGUDO MARTINEZ', 'VALERIA DUARTE',
 )
 
+# Pagadoras de la consulta cuyo concepto habitual es "terapia" o "cita", no
+# "sesion". Esas dos palabras son demasiado comunes para contar por sí solas (un
+# "cita previa" o "terapia de pareja" en un ingreso de Pablo no es facturación),
+# así que solo cuentan si la descripción trae además una de estas pagadoras.
+# Incluye las de arriba más Rocío Novella y "VALERIA D R" (cadena muy corta: nunca
+# se acepta como match suelto, solo combinada con terapia/cita).
+_MARIA_TERAPIA_CITA_PAGADORES = _MARIA_CONSULTA_PAGADORES + ('NOVELLA CEPERUELO', 'VALERIA D R')
+
 # Concepto de sesión fechada de un paciente: "Sesion 13 Julio", "Sesion 26 Agosto",
-# "Sesion 3 Octubre". Distingue la consulta de María de un "Sesion de padel" o
-# "Sesion de coaching" que pudiera aparecer en un ingreso de Pablo.
-_SESION_FECHADA_RE = re.compile(r'SESI[OÓ]N\s+\d')
+# "Sesi-n 3 Octubre". La ó de "sesión" llega a veces mal codificada como guion o
+# guion bajo. Distingue la consulta de María de un "Sesion de padel" o "Sesion de
+# coaching" que pudiera aparecer en un ingreso de Pablo.
+_SESION_FECHADA_RE = re.compile(r'SESI[OÓ\-_]N\s+\d')
+
+# "Terapia" / "cita" como palabra completa (evita casar 'solicita', 'citado', etc.).
+_TERAPIA_CITA_RE = re.compile(r'\b(?:TERAPIA|CITA)\b')
 
 
 def _is_sesion_psicologia_maria(desc_upper: str) -> bool:
@@ -69,18 +82,23 @@ def _is_sesion_psicologia_maria(desc_upper: str) -> bool:
     de trabajo y queda fuera de los ingresos compensatorios. Aprobado por Pablo
     2026-09-01.
 
-    Se reconoce por pagador conocido (_MARIA_CONSULTA_PAGADORES, para los que no
-    ponen concepto) o por concepto de sesión: 'Sesion Psicologia' o una sesión
-    fechada tipo 'Sesion 26 Agosto'. No basta con la palabra 'sesion' suelta para
-    no arrastrar un hipotético 'Sesion de padel'/'Sesion de coaching' de un ingreso
-    de Pablo (la función no recibe el titular). Verificado el 2026-09-01 contra
-    todo el histórico de ingresos de María: cubre los pagadores vistos (Chevere,
-    Castillero Yuste, Dominguez Navarro, Blanch Moliner) sin falsos positivos."""
+    Se reconoce por: (1) pagador conocido (_MARIA_CONSULTA_PAGADORES, para los que
+    no ponen concepto claro); (2) concepto "terapia" o "cita" como palabra completa
+    junto a una pagadora de _MARIA_TERAPIA_CITA_PAGADORES (esas palabras solas son
+    demasiado comunes y la función no recibe el titular, así que se exigen ambas);
+    (3) sesión fechada tipo 'Sesion 26 Agosto' / 'Sesi-n 3 Octubre'; (4) 'sesion' +
+    'psicolog'. No basta la palabra 'sesion' suelta, para no arrastrar un
+    'Sesion de padel'/'Sesion de coaching' de un ingreso de Pablo. Verificado el
+    2026-09-01 contra todo el histórico de ingresos de María: cubre los pagadores
+    vistos (Chevere, Castillero Yuste, Dominguez Navarro, Blanch Moliner,
+    Monteagudo Martinez, Novella Ceperuelo, Valeria Duarte) sin falsos positivos."""
     if any(p in desc_upper for p in _MARIA_CONSULTA_PAGADORES):
         return True
-    if 'SESION' not in desc_upper and 'SESIÓN' not in desc_upper:
-        return False
-    return 'PSICOLOG' in desc_upper or bool(_SESION_FECHADA_RE.search(desc_upper))
+    if _TERAPIA_CITA_RE.search(desc_upper) and any(p in desc_upper for p in _MARIA_TERAPIA_CITA_PAGADORES):
+        return True
+    if _SESION_FECHADA_RE.search(desc_upper):
+        return True
+    return ('SESION' in desc_upper or 'SESIÓN' in desc_upper) and 'PSICOLOG' in desc_upper
 
 
 def is_renta_trabajo(descripcion: str) -> bool:
